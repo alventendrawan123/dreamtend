@@ -27,7 +27,7 @@ export const NETWORKS: Record<NetworkName, NetworkConfig> = {
     chainId: 50312,
     nativeSymbol: "STT",
     rpc: process.env.TESTNET_RPC ?? "https://dream-rpc.somnia.network",
-    restApi: process.env.TESTNET_REST_API ?? "https://stg.api.dreamdex.io",
+    restApi: process.env.TESTNET_REST_API ?? "https://stg.api.dreamdex.io/v0",
     wsUrl: process.env.TESTNET_WS ?? "wss://stg.api.dreamdex.io/v0/ws/public",
     explorer: "https://shannon-explorer.somnia.network",
   },

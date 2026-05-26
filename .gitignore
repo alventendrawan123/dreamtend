@@ -57,3 +57,7 @@ ecosystem.config.local.js
 .cache/
 tmp/
 temp/
+
+# Draft commit messages (delete after use)
+COMMIT_MSG.txt
+COMMIT_MSG_*.txt

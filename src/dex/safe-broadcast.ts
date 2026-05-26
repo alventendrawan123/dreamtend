@@ -98,12 +98,25 @@ export async function safePlaceOrder(
 
   assertOrderPlacedEvent(receipt, ORDER_PLACED_TOPIC);
 
+  // CRITICAL: orderId from receipt, not from sim. OrderIds are
+  // sequential — sim returns the orderId at sim time, but by the time
+  // broadcast happens, other orders may have been placed, so the actual
+  // assigned orderId can differ. Always trust the receipt's emitted event.
+  const realOrderId = extractOrderIdFromReceipt(receipt) ?? simOrderId;
+
+  if (realOrderId !== simOrderId) {
+    logger.warn(
+      { simOrderId: simOrderId.toString(), realOrderId: realOrderId.toString() },
+      "OrderId drifted between sim and broadcast — using receipt value",
+    );
+  }
+
   logger.info(
-    { txHash: receipt.hash, orderId: simOrderId.toString() },
+    { txHash: receipt.hash, orderId: realOrderId.toString() },
     `placeOrder confirmed on ${handle.pool.symbol}`,
   );
 
-  return { orderId: simOrderId, txHash: receipt.hash };
+  return { orderId: realOrderId, txHash: receipt.hash };
 }
 
 export async function safeCancelOrder(

@@ -84,7 +84,56 @@ export class Day7LiquidatorStrategy extends Strategy {
   async liquidate(): Promise<void> {
     await this.cancelAllResting();
     await this.dumpBaseToQuote();
+    await this.withdrawAllToWallet();
     this.ctx.logger.info("Day7Liquidator finished pass");
+  }
+
+  private async withdrawAllToWallet(): Promise<void> {
+    const base = this.ctx.pool.baseToken;
+    const quote = this.ctx.pool.quoteToken;
+
+    const quoteFree: bigint = await this.ctx.pool.readonly.getWithdrawableBalance(
+      this.ctx.walletAddress,
+      quote.address,
+    );
+    const baseFree: bigint = await this.ctx.pool.readonly.getWithdrawableBalance(
+      this.ctx.walletAddress,
+      base.address,
+    );
+
+    this.ctx.logger.info(
+      {
+        [`${quote.symbol}_free`]: quoteFree.toString(),
+        [`${base.symbol}_free`]: baseFree.toString(),
+      },
+      "Withdrawing vault free balances to wallet",
+    );
+
+    if (quoteFree > 0n) {
+      try {
+        const tx = await this.ctx.pool.contract.withdraw(quote.address, quoteFree);
+        const receipt = await tx.wait();
+        this.ctx.logger.info(
+          { token: quote.symbol, amount: quoteFree.toString(), txHash: receipt?.hash },
+          "Withdrew quote token to wallet",
+        );
+      } catch (err) {
+        this.recordError(err);
+      }
+    }
+
+    if (baseFree > 0n) {
+      try {
+        const tx = await this.ctx.pool.contract.withdraw(base.address, baseFree);
+        const receipt = await tx.wait();
+        this.ctx.logger.info(
+          { token: base.symbol, amount: baseFree.toString(), txHash: receipt?.hash },
+          "Withdrew base token to wallet (couldn't dump — manual swap to USDso needed)",
+        );
+      } catch (err) {
+        this.recordError(err);
+      }
+    }
   }
 
   private async cancelAllResting(): Promise<void> {

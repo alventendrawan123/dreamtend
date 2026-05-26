@@ -3,6 +3,8 @@ import { getChainContext } from "./utils/signer.js";
 import { getPoolHandle } from "./dex/contracts.js";
 import { DreamDexWsClient } from "./dex/websocket.js";
 import { MarketMakerStrategy } from "./strategies/market-maker.js";
+import { Day7LiquidatorStrategy } from "./strategies/day7-liquidator.js";
+import { MomentumStrategy } from "./strategies/momentum.js";
 import { Strategy } from "./strategies/base.js";
 import {
   ALLOCATIONS,
@@ -10,6 +12,7 @@ import {
   SPREADS_BPS,
   ORDER,
   FEATURES,
+  DAY7,
   MS_PER_HOUR,
 } from "./config/constants.js";
 
@@ -66,6 +69,34 @@ export class Orchestrator {
         logger.warn(
           { pair: PAIRS.secondary, err: (err as Error).message },
           "Secondary MM unavailable, skipping",
+        );
+      }
+    }
+
+    if (FEATURES.day7Liquidator) {
+      try {
+        const day7 = await this.buildDay7(PAIRS.primary, address);
+        if (day7) this.strategies.push(day7);
+      } catch (err) {
+        logger.warn(
+          { pair: PAIRS.primary, err: (err as Error).message },
+          "Day-7 liquidator unavailable on primary pool, skipping",
+        );
+      }
+    }
+
+    if (FEATURES.momentum) {
+      try {
+        const momentum = await this.buildMomentum(
+          PAIRS.secondary,
+          ORDER.notionalUsdso * ALLOCATIONS.momentum,
+          address,
+        );
+        if (momentum) this.strategies.push(momentum);
+      } catch (err) {
+        logger.warn(
+          { pair: PAIRS.secondary, err: (err as Error).message },
+          "Momentum chaser unavailable, skipping",
         );
       }
     }
@@ -161,6 +192,48 @@ export class Orchestrator {
         requoteTriggerBps: ORDER.requoteTriggerBps,
         refreshIntervalMs: 15_000,
         expireMs: MS_PER_HOUR,
+      },
+    );
+  }
+
+  private async buildDay7(
+    symbol: string,
+    walletAddress: string,
+  ): Promise<Day7LiquidatorStrategy | undefined> {
+    const pool = await getPoolHandle(symbol);
+    return new Day7LiquidatorStrategy(
+      {
+        logger,
+        pool,
+        walletAddress,
+        dryRun: this.opts.dryRun ?? false,
+      },
+      {
+        fireAtIsoUtc: DAY7.liquidateAt,
+        checkIntervalMs: 60_000,
+        slippageBps: 100,
+      },
+    );
+  }
+
+  private async buildMomentum(
+    symbol: string,
+    notional: number,
+    walletAddress: string,
+  ): Promise<MomentumStrategy | undefined> {
+    const pool = await getPoolHandle(symbol);
+    return new MomentumStrategy(
+      {
+        logger,
+        pool,
+        walletAddress,
+        dryRun: this.opts.dryRun ?? false,
+      },
+      {
+        windowMs: 60_000,
+        thresholdBps: 50,
+        notionalUsdso: notional,
+        cooldownMs: 30_000,
       },
     );
   }

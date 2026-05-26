@@ -123,3 +123,41 @@ Calling `getBookLevels(true, 3)` against a pool with zero resting bid liquidity 
 
 ### Suggested fix
 Change view function semantics to return empty arrays instead of reverting. Reverts in view functions should only occur for invalid args (e.g. depth > some hard cap), not for sparse-data scenarios that the caller wants to inspect.
+
+---
+
+## Obs-004: Testnet USDso onboarding undocumented + chronic liquidity gap
+
+**Discovered:** 2026-05-26→27, Phase 3 testnet validation attempts
+**Severity:** High (blocks testnet validation pre-mainnet)
+**Type:** Doc gap + testnet liquidity
+
+### What docs say
+Quick Start, Roadmap, Spot Overview, and Contract Specifications pages do not mention how to acquire **testnet USDso** for the Shannon network. Only after escalating to DevRel did we learn (via Telegram group, Emre 2026-05-25):
+
+> *"You can swap STT [via testnet SOMI/USDso pool]"*
+
+with a link to the contract-specifications page — but that page lists addresses, not a how-to.
+
+### What actually happens
+Even with the swap-via-pool path known, **the testnet SOMI/USDso book is chronically empty**:
+
+- `getBookLevels(true, 5)` returns `([], [])` on 10 consecutive attempts over 2.5 minutes (verified 2026-05-27 00:19–00:21 UTC).
+- Emre observed a `bestBid=0.1744` on 2026-05-25, indicating intermittent liquidity, but no consistent flow.
+- A taker `placeTakerOrderWithoutVault(isBid=false)` cannot fill if no bids rest.
+
+So the documented swap path requires you to either (a) wait indefinitely for someone else to post a bid, or (b) post a maker order yourself and hope someone takes it — neither of which is "swap."
+
+### Impact
+- New testers cannot acquire USDso testnet on demand.
+- Full bid+ask MM strategies cannot be validated on testnet (single-sided ask-only is the only feasible test).
+- Forces premature mainnet validation, increasing risk for testers learning the API.
+
+### Suggested fix (any one is sufficient)
+1. **Dedicated faucet** at e.g. `https://testnet.somnia.network/faucet/usdso` that issues 100 USDso testnet per wallet per day.
+2. **Public `mint()` on testnet USDso contract** (`0x9c32F38…`) gated by per-address rate limit. Standard pattern for testnet stablecoins.
+3. **Seeded baseline liquidity** in testnet pools by the DreamDEX team (e.g. one DevRel-funded wallet posting wide bids+asks 24/7 — same role Anjali plays for kick-off).
+4. **Document the swap path** explicitly: a "Acquiring testnet USDso" page in Quick Start with copy-paste curl/ethers snippets and a warning that liquidity is intermittent.
+
+### Workaround (DreamTend bot ships with)
+Bot validates code paths via typecheck + dry-run (`npm start -- --dry-run`). Real on-chain validation deferred to mainnet with reduced notional (e.g. $0.5 per leg) and tight stop-loss until pipeline is confirmed working.

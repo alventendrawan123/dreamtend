@@ -16,6 +16,21 @@ export interface SpotPoolMethods {
     [boolean, bigint],
     ethers.ContractTransactionResponse
   >;
+  placeTakerOrderWithoutVault: ethers.BaseContractMethod<
+    [
+      boolean,
+      bigint,
+      bigint,
+      bigint,
+      bigint,
+      number,
+      number,
+      string,
+      bigint,
+    ],
+    [boolean, bigint],
+    ethers.ContractTransactionResponse
+  >;
   cancelOrder: ethers.BaseContractMethod<
     [bigint],
     void,

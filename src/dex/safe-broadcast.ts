@@ -21,8 +21,23 @@ export interface PlaceOrderArgs {
   builderFeeBpsTimes1k?: bigint;
 }
 
-const ORDER_PLACED_EVENT = "OrderPlaced(uint128,address,bool,uint8,uint256,uint256,uint64)";
-const ORDER_PLACED_TOPIC = ethers.id(ORDER_PLACED_EVENT);
+// Empirically verified on Somnia mainnet 2026-05-27 via tx receipt logs
+// (e.g. tx 0x79d4b340ad448571a5b7ea461d33ebff81128c67e124700cff636bfd08157dcf).
+// The exact field layout for the non-indexed `placedOrder` data is undocumented
+// but the topic[0] and topic[1]=orderId positions are stable. See Obs-006.
+const ORDER_PLACED_TOPIC =
+  "0xd90f62f61ee2f606b132cfdfd883ddd079228b6fd6bffd9d7cf848daf824639d";
+
+export function extractOrderIdFromReceipt(
+  receipt: ethers.TransactionReceipt,
+): bigint | undefined {
+  for (const log of receipt.logs) {
+    if (log.topics[0] === ORDER_PLACED_TOPIC && log.topics[1]) {
+      return BigInt(log.topics[1]);
+    }
+  }
+  return undefined;
+}
 
 export async function safePlaceOrder(
   handle: PoolHandle,

@@ -30,7 +30,9 @@ export const POOLS: Record<NetworkName, Record<string, PoolConfig>> = {
       poolAddress: "0x47fD2f18426f67106DBaC82F6d21D446c5F2120b",
       stopRegistry: "0xD53E3F3b73513F2147377ef8f573f649cF60100c",
       tickSize: 0.0001,
-      lotSize: 0.01,
+      // CONFIRMED on-chain via getPoolParams() on 2026-05-27: lotRaw=1000000 (= 1.0 USDC.e at 6 dec).
+      // Docs / SKILL.md §4 said 0.01 — wrong. See Obs-005.
+      lotSize: 1.0,
       minQuantity: 1,
     },
     "WBTC:USDso": {

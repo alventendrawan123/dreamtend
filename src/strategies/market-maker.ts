@@ -32,6 +32,9 @@ export class MarketMakerStrategy extends Strategy {
   private myAsk: OpenOrder | undefined;
   private lastMid: number | undefined;
   private tickTimer: NodeJS.Timeout | undefined;
+  private requoteInProgress = false;
+  private lastRequoteAt = 0;
+  private readonly requoteCooldownMs = 2_000;
 
   constructor(
     ctx: StrategyContext,
@@ -100,6 +103,19 @@ export class MarketMakerStrategy extends Strategy {
   }
 
   private async requote(): Promise<void> {
+    if (this.requoteInProgress) return;
+    const now = Date.now();
+    if (now - this.lastRequoteAt < this.requoteCooldownMs) return;
+    this.requoteInProgress = true;
+    this.lastRequoteAt = now;
+    try {
+      await this.requoteInner();
+    } finally {
+      this.requoteInProgress = false;
+    }
+  }
+
+  private async requoteInner(): Promise<void> {
     const mid = await this.readMid();
     if (mid === undefined) {
       this.ctx.logger.warn(

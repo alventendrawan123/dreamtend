@@ -21,6 +21,8 @@ export class Orchestrator {
   private strategies: Strategy[] = [];
   private ws: DreamDexWsClient | undefined;
   private shutdownRequested = false;
+  private shutdownDone: (() => void) | undefined;
+  private shutdownComplete: Promise<void> | undefined;
 
   constructor(private readonly opts: OrchestratorOptions = {}) {}
 
@@ -107,17 +109,17 @@ export class Orchestrator {
       "Orchestrator running",
     );
 
-    process.on("SIGINT", () => this.shutdown());
-    process.on("SIGTERM", () => this.shutdown());
-
-    await new Promise<void>((resolve) => {
-      const checkShutdown = setInterval(() => {
-        if (this.shutdownRequested) {
-          clearInterval(checkShutdown);
-          resolve();
-        }
-      }, 1000);
+    this.shutdownComplete = new Promise<void>((resolve) => {
+      this.shutdownDone = resolve;
     });
+    const onSig = (sig: string): void => {
+      logger.info({ sig }, "Signal received");
+      this.shutdown().catch((err) => logger.error({ err }, "Shutdown failed"));
+    };
+    process.on("SIGINT", () => onSig("SIGINT"));
+    process.on("SIGTERM", () => onSig("SIGTERM"));
+
+    await this.shutdownComplete;
   }
 
   async shutdown(): Promise<void> {
@@ -134,6 +136,7 @@ export class Orchestrator {
     }
     this.ws?.close();
     logger.info("Shutdown complete");
+    this.shutdownDone?.();
   }
 
   private async buildMM(

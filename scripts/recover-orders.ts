@@ -1,0 +1,55 @@
+import "dotenv/config";
+import { ethers } from "ethers";
+import { getChainContext } from "../src/utils/signer.js";
+import { getPoolHandle } from "../src/dex/contracts.js";
+import { safeCancelOrder } from "../src/dex/safe-broadcast.js";
+import { logger } from "../src/utils/logger.js";
+
+const ORDER_PLACED_TOPIC = ethers.id(
+  "OrderPlaced(uint128,address,bool,uint8,uint256,uint256,uint64)",
+);
+const TX_HASHES = process.argv.slice(2);
+
+async function main(): Promise<void> {
+  if (TX_HASHES.length === 0) {
+    throw new Error("Provide one or more tx hashes as args");
+  }
+  const ctx = await getChainContext({ requireSigner: true });
+  if (!ctx.wallet) throw new Error("Signer required");
+  const handle = await getPoolHandle("USDC.e:USDso");
+
+  const orderIds: bigint[] = [];
+  for (const hash of TX_HASHES) {
+    const r = await ctx.provider.getTransactionReceipt(hash);
+    if (!r) {
+      logger.warn({ hash }, "No receipt");
+      continue;
+    }
+    for (const log of r.logs) {
+      if (log.topics[0] === ORDER_PLACED_TOPIC) {
+        const orderId = BigInt(log.topics[1] ?? "0x0");
+        orderIds.push(orderId);
+        logger.info(
+          { hash, orderId: orderId.toString(), poolAddr: log.address },
+          "Found OrderPlaced event",
+        );
+      }
+    }
+  }
+
+  logger.info({ count: orderIds.length }, "Total open orders identified");
+
+  for (const id of orderIds) {
+    try {
+      const tx = await safeCancelOrder(handle, id);
+      logger.info({ orderId: id.toString(), tx }, "Cancelled");
+    } catch (err) {
+      logger.error({ orderId: id.toString(), err: (err as Error).message }, "Cancel failed");
+    }
+  }
+}
+
+main().catch((err) => {
+  logger.fatal({ err });
+  process.exit(1);
+});

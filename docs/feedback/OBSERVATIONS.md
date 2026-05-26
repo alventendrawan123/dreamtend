@@ -161,3 +161,93 @@ So the documented swap path requires you to either (a) wait indefinitely for som
 
 ### Workaround (DreamTend bot ships with)
 Bot validates code paths via typecheck + dry-run (`npm start -- --dry-run`). Real on-chain validation deferred to mainnet with reduced notional (e.g. $0.5 per leg) and tight stop-loss until pipeline is confirmed working.
+
+---
+
+## Obs-005: Pool params in docs (SKILL.md / contract specs page) don't match on-chain reality
+
+**Discovered:** 2026-05-27, Phase 4 mainnet first trial
+**Severity:** High (silent revert, wasted gas potential)
+**Type:** Doc gap + tick/lot/minQty drift
+
+### What docs say (Contract Specifications page, SKILL.md §4)
+USDC.e:USDso mainnet pool: `tickSize=0.0001, lotSize=0.01, minQuantity=1`.
+
+### What `getPoolParams()` returns
+`tickRaw=100000000000000` (= 0.0001 USDso ✓), `lotRaw=1000000` (= **1.0 USDC.e**, not 0.01), `minQtyRaw=1000000` (= 1.0 USDC.e ✓).
+
+### Reproduction
+```bash
+NETWORK=mainnet npx tsx scripts/sanity-check.ts
+# Look for "Pool USDC.e:USDso params (RPC)" line: lotRaw=1000000 → lot≈1
+```
+
+### Impact
+- Bot computes qty from notional/mid using docs lot (0.01), aligns to 0.01 → ends up at e.g. 1.5 USDC.e.
+- Tx broadcasts; chain accepts the order (= 1.5 USDC.e is still tradeable, since 1.5 ≥ minQty=1 and contract lot enforcement seems lenient).
+- BUT for stricter pools or for tighter alignment intent, behavior diverges from doc-derived expectation.
+- Same class of issue as Obs-001 (`getPoolParams` 7 vs 8 fields): docs/code aren't fed from on-chain ground truth.
+
+### Suggested fix
+- **Always read `getPoolParams()` at bot startup** and use those values as source of truth (DreamTend now does this — see "Always read pool params on startup" gotcha bake-in).
+- Update the Contract Specifications page to either auto-generate from chain or add a "Last verified DD/MM/YYYY" stamp + monitoring script that warns devs when on-chain values drift.
+
+---
+
+## Obs-006: `OrderPlaced` event signature undocumented; topic hash must be reverse-engineered
+
+**Discovered:** 2026-05-27, Phase 4 mainnet first trial
+**Severity:** Critical (silent rejection — orders succeed on chain but bot thinks they failed)
+**Type:** Doc gap → systemic correctness issue
+
+### What docs say (Contracts page, SKILL.md §8 Event Schema)
+> `OrderPlaced` | indexed: `orderId` | non-indexed: `placedOrder struct`
+
+No exact struct layout, no field order, no example. Only a paragraph.
+
+### What integrators must do
+Compute the event topic from a guessed Solidity signature. If wrong, `eth_getLogs` filters silently return empty, and any `receipt.logs.some(l => l.topics[0] === guess)` check fails — even though the event WAS emitted by the contract.
+
+### Concrete reproduction (DreamTend bot, 2026-05-27)
+1. Bot signed and broadcast `placeOrder(...)` against USDC.e:USDso pool
+2. Tx mined with `status=1` (confirmed via Blockscout: `0x79d4b340ad448571a5b7ea461d33ebff81128c67e124700cff636bfd08157dcf`)
+3. Receipt contained 2 logs at pool address:
+   - `topics[0] = 0xd90f62f61ee2f606b132cfdfd883ddd079228b6fd6bffd9d7cf848daf824639d` (actual OrderPlaced)
+   - `topics[0] = 0xcdd45acd62788abc10f79d86fac34df2a63e1a3b20f061c5bcf431ff6a09b866` (likely OrderRested)
+4. Bot computed expected topic from guess `OrderPlaced(uint128,address,bool,uint8,uint256,uint256,uint64)` → `0xab3b34d17edf17a0ae16689862fd0c473a207b199178b96f0bf71cd63a55edfa` (different from actual)
+5. Verification failed → bot threw SILENT_REJECTION even though the order WAS placed and rested on book
+6. Bot lost track of order → couldn't cancel on shutdown → 1.5 USDso locked until manual recovery via `eth_getLogs` + `cancelOrder(orderId)`
+
+### Impact
+- ANY integrator using event verification will hit this until they reverse-engineer the topic from a real on-chain receipt
+- "Silent rejection" pattern recommended in SKILL.md §12 #9 (and likely in DreamDEX docs) becomes a footgun: returns silent failure where a tx succeeded
+- Wasted gas if bot retries because it thinks tx didn't take effect
+
+### Suggested fix
+- **Publish the exact Solidity event signatures** on the Contracts page:
+  - Field order in `placedOrder` struct
+  - Exact ABI tuple notation
+  - Sample topic hash + sample event payload
+- Add a "Common pitfalls" callout linking to a Hardhat/Foundry test or ethers snippet showing event decoding end-to-end
+- (Bonus) Publish Typechain/Wagmi codegen artifacts so integrators don't have to hand-build ABIs
+
+---
+
+## Obs-007: `cancelOrder` may revert with custom error after fill; reverted orderIds need explorer dive
+
+**Discovered:** 2026-05-27, Phase 4 recovery flow
+**Severity:** Medium (DX cliff during manual recovery)
+**Type:** Smart contract UX
+
+### What happens
+After two `placeOrder` calls succeeded on chain (orderIds `0x080…185d2f` and `0x0a0…185d73`), an attempt to `cancelOrder(0x080…185d2f)` reverts with custom selector `0xf5e39c1f` (likely `OrderNotFound(address,uint256)`).
+
+The second orderId (`0x0a0…185d73`) cancelled successfully and returned funds.
+
+### Hypothesis
+The first order was fully filled (against an opposing taker) before our cancel attempt; once filled, the orderId no longer maps to a resting position so cancelOrder reverts. This is operationally normal, but the revert reason is opaque without ABI for the custom error.
+
+### Suggested fix
+Two small improvements:
+1. **Decode and surface** a friendly error name + args via the ABI. The current revert is `0xf5e39c1f` + 2 fields — without a documented error registry, integrators get a hex blob.
+2. **Add an `isOrderFillable(orderId)` view** that returns `(exists, filled, remaining)` so cancel-paths can branch without trial reverts.

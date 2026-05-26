@@ -1003,8 +1003,9 @@ Due 2026-06-01 (snapshot time TBD by team — likely 10:00 UTC).
 ## 19. References
 
 ### Documentation
-- DreamDEX docs (token A): https://docs.dreamdex.io/ld25g222WKDrLlJMcR41/
-- DreamDEX docs (token B): https://docs.dreamdex.io/uK9H3quGFeuU9dyKOiCH/
+- **Canonical docs:** https://docs.dreamdex.io/ld25g222WKDrLlJMcR41/  (custom domain)
+- **Gitbook host alias:** https://metaversal.gitbook.io/dex/ld25g222WKDrLlJMcR41  (307 redirects to canonical — Anjali's welcome message uses this older URL; bookmark the canonical)
+- DreamDEX docs (token B variant): https://docs.dreamdex.io/uK9H3quGFeuU9dyKOiCH/
 - DreamDEX full text dump: https://docs.dreamdex.io/ld25g222WKDrLlJMcR41/llms-full.txt
 - Somnia network docs: https://docs.somnia.network
 - Somnia Agentic L1 thesis: https://blog.somnia.network/p/somnia-the-agentic-l1-blockchain

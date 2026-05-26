@@ -5,9 +5,9 @@ import { getPoolHandle } from "../src/dex/contracts.js";
 import { safeCancelOrder } from "../src/dex/safe-broadcast.js";
 import { logger } from "../src/utils/logger.js";
 
-const ORDER_PLACED_TOPIC = ethers.id(
-  "OrderPlaced(uint128,address,bool,uint8,uint256,uint256,uint64)",
-);
+// Empirically verified on-chain — see safe-broadcast.ts + Obs-006
+const ORDER_PLACED_TOPIC =
+  "0xd90f62f61ee2f606b132cfdfd883ddd079228b6fd6bffd9d7cf848daf824639d";
 const TX_HASHES = process.argv.slice(2);
 
 async function main(): Promise<void> {

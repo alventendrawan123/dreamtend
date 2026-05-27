@@ -19,10 +19,11 @@ interface BotWallet {
 
 const POOL_SYMBOL = process.argv[2] ?? "SOMI:USDso";
 const QTY_BASE = process.argv[3] ?? "1";
-const PRICE_QUOTE = process.argv[4] ?? "0.05";
-const CYCLE_INTERVAL_MS = Number(process.argv[5] ?? "15000");
-const MAX_CYCLES = Number(process.argv[6] ?? "100");
-const MAKER_WALLET_INDEX = Number(process.argv[7] ?? "3");
+const SELL_PRICE_QUOTE = process.argv[4] ?? "0.05";
+const BUY_PRICE_QUOTE = process.argv[5] ?? "0.30";
+const CYCLE_INTERVAL_MS = Number(process.argv[6] ?? "15000");
+const MAX_CYCLES = Number(process.argv[7] ?? "100");
+const MAKER_WALLET_INDEX = Number(process.argv[8] ?? "3");
 
 const ORDER_PLACED_TOPIC =
   "0xd90f62f61ee2f606b132cfdfd883ddd079228b6fd6bffd9d7cf848daf824639d";
@@ -60,8 +61,10 @@ async function main(): Promise<void> {
   const takerPool = new ethers.Contract(pool.poolAddress, SPOTPOOL_ABI, takerWallet) as SpotPoolContract;
 
   const qtyRaw = ethers.parseUnits(QTY_BASE, baseTok.decimals);
-  const priceRaw = ethers.parseUnits(PRICE_QUOTE, quoteTok.decimals);
-  const costPerCycle = (qtyRaw * priceRaw) / 10n ** BigInt(baseTok.decimals);
+  const sellPriceRaw = ethers.parseUnits(SELL_PRICE_QUOTE, quoteTok.decimals);
+  const buyPriceRaw = ethers.parseUnits(BUY_PRICE_QUOTE, quoteTok.decimals);
+  const maxCost = qtyRaw * (sellPriceRaw > buyPriceRaw ? sellPriceRaw : buyPriceRaw) / 10n ** BigInt(baseTok.decimals);
+  const costPerCycle = maxCost;
 
   // For "buy" direction, taker needs USDso allowance
   if (!baseTok.isNative) {
@@ -93,7 +96,8 @@ async function main(): Promise<void> {
       maker: makerWallet.address,
       taker: takerWallet.address,
       qty: QTY_BASE,
-      price: PRICE_QUOTE,
+      sellPrice: SELL_PRICE_QUOTE,
+      buyPrice: BUY_PRICE_QUOTE,
       costPerCycleRaw: costPerCycle.toString(),
       cycleMs: CYCLE_INTERVAL_MS,
       maxCycles: MAX_CYCLES,
@@ -106,6 +110,7 @@ async function main(): Promise<void> {
   let stopped = false;
   let direction: Direction = "sell";
   let directionSwitches = 0;
+  let consecutiveSwitches = 0;
 
   process.on("SIGINT", () => { stopped = true; logger.warn("SIGINT — stopping after cycle"); });
   process.on("SIGTERM", () => { stopped = true; logger.warn("SIGTERM — stopping after cycle"); });
@@ -114,31 +119,55 @@ async function main(): Promise<void> {
     const makerUsdso: bigint = await makerPool.getWithdrawableBalance(makerWallet.address, quoteTok.address);
     const makerBase: bigint = await makerPool.getWithdrawableBalance(makerWallet.address, baseTok.address);
     const takerNative = await provider.getBalance(takerWallet.address);
-    const takerUsdsoBal: bigint = await new ethers.Contract(
+    const erc20Read = new ethers.Contract(
       quoteTok.address,
       ["function balanceOf(address) view returns (uint256)"],
       provider,
-    ).balanceOf(takerWallet.address);
+    );
+    const takerUsdsoBal: bigint = await (erc20Read.balanceOf as ethers.BaseContractMethod<
+      [string],
+      bigint,
+      bigint
+    >)(takerWallet.address);
 
-    if (direction === "sell") {
-      if (makerUsdso < costPerCycle || (baseTok.isNative && takerNative < qtyRaw + ethers.parseEther("0.05"))) {
-        if (direction === "sell") {
-          direction = "buy";
-          directionSwitches += 1;
-          logger.warn({ cycle }, "Switching direction → BUY (W3 sells SOMI vault, Reg IOC BUY)");
-          continue;
-        }
-      }
-    } else {
-      if (makerBase < qtyRaw || takerUsdsoBal < costPerCycle) {
-        if (direction === "buy") {
-          direction = "sell";
-          directionSwitches += 1;
-          logger.warn({ cycle }, "Switching direction → SELL (W3 BID, Reg IOC SELL)");
-          continue;
-        }
-      }
+    const sellBlocked = makerUsdso < costPerCycle || (baseTok.isNative && takerNative < qtyRaw + ethers.parseEther("0.05"));
+    const buyBlocked = makerBase < qtyRaw || takerUsdsoBal < costPerCycle;
+    if (sellBlocked && buyBlocked) {
+      logger.error(
+        {
+          cycle,
+          makerUsdso: ethers.formatUnits(makerUsdso, quoteTok.decimals),
+          makerBase: ethers.formatUnits(makerBase, baseTok.decimals),
+          takerNative: ethers.formatEther(takerNative),
+          takerUsdsoBal: ethers.formatUnits(takerUsdsoBal, quoteTok.decimals),
+        },
+        "BOTH directions blocked — capital exhausted, stopping loop",
+      );
+      break;
     }
+    if (direction === "sell" && sellBlocked) {
+      direction = "buy";
+      directionSwitches += 1;
+      consecutiveSwitches += 1;
+      logger.warn({ cycle }, "Switching direction → BUY (W3 sells SOMI vault, Reg IOC BUY)");
+      if (consecutiveSwitches >= 2) {
+        logger.error({ consecutiveSwitches }, "Direction thrashing detected — stopping");
+        break;
+      }
+      continue;
+    }
+    if (direction === "buy" && buyBlocked) {
+      direction = "sell";
+      directionSwitches += 1;
+      consecutiveSwitches += 1;
+      logger.warn({ cycle }, "Switching direction → SELL (W3 BID, Reg IOC SELL)");
+      if (consecutiveSwitches >= 2) {
+        logger.error({ consecutiveSwitches }, "Direction thrashing detected — stopping");
+        break;
+      }
+      continue;
+    }
+    consecutiveSwitches = 0;
 
     logger.info(
       {
@@ -153,6 +182,7 @@ async function main(): Promise<void> {
       "=== CYCLE START ===",
     );
 
+    const priceRaw = direction === "sell" ? sellPriceRaw : buyPriceRaw;
     try {
       const result = await runOneCycle({
         direction,

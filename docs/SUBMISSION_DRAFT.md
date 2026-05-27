@@ -292,7 +292,14 @@ Scheduled cron-style strategy with three steps: cancel-all → IOC dump → with
 
 ## Section E — Feedback Reports
 
-Five polished feedback reports covering critical doc gaps, ABI mismatches, and on-chain UX issues discovered through DreamTend's live operation:
+**13 polished feedback reports** covering critical doc gaps, ABI mismatches, on-chain UX issues, competition mechanics, and SDK/protocol design opportunities discovered through DreamTend's live operation. Each report follows the canonical Type / Severity / Environment / Steps to Reproduce / Expected / Actual / Logs / Suggested Fix / Acceptance Criteria format. Severity matrix:
+
+| Tier | Reports | Severity mix |
+|---|---|---|
+| Original (E.1-E.5) | 01-05 | 1 Critical, 3 High, 1 Medium |
+| Polished from observations (E.6-E.7) | 06-07 | 1 High, 1 Medium |
+| New from live learnings (E.8-E.10) | 08-10 | 3 High |
+| Extended / new discoveries (E.11-E.13) | 11-13 | 3 Medium |
 
 ### E.1 — `OrderPlaced` Event Signature Undocumented (Critical)
 Source: `docs/feedback/01-event-topic-undocumented.md`
@@ -314,7 +321,39 @@ Bug: No documented way to acquire testnet USDso. Testnet SOMI/USDso pool is chro
 Source: `docs/feedback/05-getbooklevels-empty-revert.md`
 Bug: `getBookLevels(isBid, depth)` reverts with bare `require(false)` on empty book instead of returning `([], [])`. Same pattern affects `getOwnOpenOrders`.
 
-**Additional 7 observations** captured in `docs/feedback/OBSERVATIONS.md` (raw log, ready to be promoted to formal reports if engineering wants the full set).
+### E.6 — Testnet REST API `/v0` Path Hidden From Base URL (High)
+Source: `docs/feedback/06-testnet-rest-v0-path-undocumented.md`
+Bug: Docs list testnet base as `https://stg.api.dreamdex.io` (no `/v0`), but the actual API requires `/v0` on testnet just like mainnet. Asymmetric documentation pattern causes 15-30 min of "API is down" debugging per new tester.
+
+### E.7 — `cancelOrder` Custom-Error Revert + No `isOrderFillable` View (Medium)
+Source: `docs/feedback/07-cancelorder-no-isfillable-view.md`
+Bug: Cancelling an already-filled order reverts with opaque selector `0xf5e39c1f`. No published ABI for the error, no pre-check view function (`isOrderFillable`). Forces every recovery flow to blanket-catch reverts.
+
+### E.8 — Custom Error Registry Not Published (High)
+Source: `docs/feedback/08-custom-error-registry-gap.md`
+Bug: Every SpotPool revert that uses a custom error returns a bare 4-byte selector + args with no published ABI. Integrators cannot decode reverts programmatically; they fall back to brittle hex string matching. Touches selectors `0xf5e39c1f`, `0xcf479181`, and probably more.
+
+### E.9 — Leaderboard PnL Formula Excludes Vault & Inventory (High)
+Source: `docs/feedback/09-leaderboard-pnl-vault-blind.md`
+Bug: The `wallet_USDso - 50` formula ignores vault deposits, inventory in other tokens (WETH, USDC.e, etc.), and capital parked in fleet sub-wallets. Penalizes market-making strategies (which hold inventory in vaults) vs pure-taker strategies. Day-7 manual liquidation is the only workaround.
+
+### E.10 — `placeTakerOrderWithoutVault` Payable Semantics For Native-Base Pools (High)
+Source: `docs/feedback/10-native-base-placeorder-payable-semantics.md`
+Bug: SELL leg on the SOMI:USDso pool requires `msg.value === qtyRaw` (native SOMI is the base token), but docs treat all pools uniformly. First-time SOMI:USDso integrators lose 30-60 minutes diagnosing the silent payable requirement.
+
+### E.11 — WebSocket Reconnect & Resume Protocol Undocumented (Medium)
+Source: `docs/feedback/11-websocket-reconnect-protocol-undocumented.md`
+Bug: No documented heartbeat, no seqNum, no resume cursor on `wss://api.dreamdex.io/v0/ws/public`. Bots that reconnect after a network blip have no way to know what was missed. Defeats the latency advantage of WS subscriptions.
+
+### E.12 — Stop Order Mechanics & Registry Lifecycle Undocumented (Medium)
+Source: `docs/feedback/12-stop-order-mechanics-undocumented.md`
+Bug: Stop registry addresses are referenced in chat / contract specs but the ABI, trigger source, lifecycle, and fee structure are not documented. Bots cannot ship stop-loss without reverse-engineering. DreamTend chose to skip on-chain stops entirely as a result.
+
+### E.13 — Multi-Wallet / AI-Agent Aggregation Policy Not in Docs (Medium)
+Source: `docs/feedback/13-multi-wallet-aggregation-policy.md`
+Bug: The "fleet wallets are allowed" policy lives only in the alpha group chat. New entrants joining mid-competition or future waves will not know multi-wallet is permitted unless they read the chat scrollback. Needs to be in public Competition Rules.
+
+**Plus 7 raw observations** (`docs/feedback/OBSERVATIONS.md`) — the working notebook these formal reports were polished from.
 
 ---
 

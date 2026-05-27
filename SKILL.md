@@ -984,7 +984,7 @@ Due 2026-06-01 (snapshot time TBD by team — likely 10:00 UTC).
   - [ ] Architecture diagram
   - [ ] Strategy explanations
   - [ ] api-gotchas.md
-- [ ] 3+ feedback reports submitted (target: 5)
+- [x] 3+ feedback reports submitted (target: 5, **actual: 13** polished — see `docs/feedback/`)
 - [ ] Master Google Doc compiled with:
   - Section A: Bot architecture
   - Section B: Feedback reports

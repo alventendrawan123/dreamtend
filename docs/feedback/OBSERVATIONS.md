@@ -1,6 +1,18 @@
 # Live Sanity-Check Observations
 
-> Running log of issues discovered during DreamTend implementation against the real DreamDEX testnet/mainnet. Each entry will be polished into a final feedback report at the end of the competition (Day 7 submission).
+> Running log of issues discovered during DreamTend implementation against the real DreamDEX testnet/mainnet. **All 7 observations below have been polished into formal feedback reports**:
+>
+> | Obs | Promoted to formal report |
+> |---|---|
+> | Obs-001 | `02-getpoolparams-field-count-mismatch.md` |
+> | Obs-002 | `06-testnet-rest-v0-path-undocumented.md` |
+> | Obs-003 | `05-getbooklevels-empty-revert.md` |
+> | Obs-004 | `04-testnet-usdso-onboarding-gap.md` |
+> | Obs-005 | `03-pool-lotsize-docs-mismatch.md` |
+> | Obs-006 | `01-event-topic-undocumented.md` |
+> | Obs-007 | `07-cancelorder-no-isfillable-view.md` |
+>
+> Additional formal reports (08-13) cover learnings that did not pass through this notebook: custom error registry, leaderboard PnL formula, native-base payable semantics, WebSocket reconnect, stop order docs, and multi-wallet policy.
 
 ---
 

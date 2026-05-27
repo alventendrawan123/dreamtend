@@ -86,7 +86,7 @@ async function main(): Promise<void> {
       cycleMs: CYCLE_INTERVAL_MS,
       maxCycles: MAX_CYCLES,
     },
-    "IOC loop starting — trader-6 style",
+    "IOC loop starting — IOC-taker alternator",
   );
 
   let totalVolumeRaw = 0n;

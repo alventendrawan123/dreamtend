@@ -1000,6 +1000,48 @@ Due 2026-06-01 (snapshot time TBD by team — likely 10:00 UTC).
 
 ---
 
+### Day-6 Demo Checklist (Phase 10 — 2026-05-31)
+
+> Source of truth untuk demo artifacts. Section C dari `docs/SUBMISSION_DRAFT.md` adalah target final.
+> Mirror dari memory `project_demo_checklist.md` + `plan.md` Day 6.
+
+**Wajib (Hard requirement):**
+
+- [ ] **Screenshot leaderboard rank progression** (3-4 frame):
+  - Rank 5 (Day 1, $2.50 vol) — kalau masih bisa di-capture
+  - Rank 4 (Day 2 mid, ~$531 vol)
+  - Rank 2 → 1 (Day 2 sore, breakthrough moment)
+  - Rank 1 dengan lead $2,500+ (current state)
+- [ ] **Screenshot explorer wallet** showing:
+  - Tx count 2148+
+  - USDso balance
+  - Recent IOC transactions list
+- [ ] **Sample TX detail screenshots** (1-2):
+  - First placeOrder `0x79d4b340ad448571a5b7ea461d33ebff81128c67e124700cff636bfd08157dcf` — bukti pertama berfungsi
+  - Latest IOC-taker — bukti pattern berhasil
+
+**Nice-to-have (boost narrative):**
+
+- [ ] **Bot console screenshot** — running cycle log dengan `[SIM OK]`, `[BROADCAST]`, `[FILLED]` lines berurutan. Bukti safety pattern bukan kata-kata.
+- [ ] **Architecture diagram** — already di `README.md`, tapi bisa di-export jadi PNG terpisah untuk Google Doc.
+- [ ] **Loom video 2-3 menit** (optional tapi powerful):
+  - (0:00-0:30) intro: "DreamTend, multi-agent IOC bot"
+  - (0:30-1:30) screen-record bot running 5-10 cycles live
+  - (1:30-2:30) leaderboard tab + explorer tab side-by-side
+  - Voiceover singkat — yang penting visual nya
+- [ ] **Sweep evidence** (post Day-7):
+  - Before sweep: vault balances dari `check-all-vaults.ts` output
+  - After sweep: wallet USDso jump
+  - Final PnL realized
+
+**Yang sudah otomatis terdokumentasi (tidak perlu kerja manual):**
+
+- `docs/run-logs/` — kalau ada log files
+- Git commit history (sudah CI-clean)
+- TX hashes (sudah di-embed di draft)
+
+---
+
 ## 19. References
 
 ### Documentation

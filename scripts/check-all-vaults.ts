@@ -8,6 +8,8 @@ import { logger } from "../src/utils/logger.js";
 
 const PROBE_ABI = ["function getWithdrawableBalance(address account, address token) view returns (uint256)"];
 
+type GetWithdrawableBalance = ethers.BaseContractMethod<[string, string], bigint, bigint>;
+
 async function main(): Promise<void> {
   const net = getActiveNetwork();
   const provider = new ethers.JsonRpcProvider(net.rpc, { chainId: net.chainId, name: net.name });
@@ -32,14 +34,15 @@ async function main(): Promise<void> {
   for (const poolSym of Object.keys(POOLS[net.name])) {
     const pool = POOLS[net.name][poolSym]!;
     const c = new ethers.Contract(pool.poolAddress, PROBE_ABI, provider);
+    const getWithdrawableBalance = c.getWithdrawableBalance as GetWithdrawableBalance;
 
     console.log(`\n📦 ${poolSym} (${pool.poolAddress})`);
     console.log("-".repeat(110));
 
     for (const a of allAddrs) {
       try {
-        const usdsoBal = await c.getWithdrawableBalance(a.address, usdso.address);
-        const somiBal = await c.getWithdrawableBalance(a.address, somi.address);
+        const usdsoBal = await getWithdrawableBalance(a.address, usdso.address);
+        const somiBal = await getWithdrawableBalance(a.address, somi.address);
         if (usdsoBal > 0n || somiBal > 0n) {
           console.log(
             `  ${a.label.padEnd(25)} USDso: ${ethers.formatUnits(usdsoBal, 18).padStart(12)}  |  SOMI: ${ethers.formatUnits(somiBal, 18).padStart(12)}`,

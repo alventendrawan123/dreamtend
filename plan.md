@@ -199,13 +199,42 @@ Claude akan mulai Phase 1 dari sana.
 - [ ] README first draft
 
 ### Day 6 — 2026-05-31
-**Target:** Demo content polish
+**Target:** Demo content polish (Phase 10)
 
-- [ ] 5th feedback report
-- [ ] Demo gif/screenshot capture
+> **Sumber checklist lengkap:** `SKILL.md` Section "Day-6 Demo Checklist" + memory file `project_demo_checklist.md`. Section C dari `docs/SUBMISSION_DRAFT.md` adalah target final.
+
+**Wajib (Hard requirement):**
+- [ ] **Screenshot leaderboard rank progression** (3-4 frame):
+  - Rank 5 (Day 1, $2.50 vol) — kalau masih bisa di-capture
+  - Rank 4 (Day 2 mid, ~$531 vol)
+  - Rank 2 → 1 (Day 2 sore, breakthrough moment)
+  - Rank 1 dengan lead $2,500+ (current state)
+- [ ] **Screenshot explorer wallet** — Tx count 2148+, USDso balance, recent IOC tx list
+- [ ] **Sample TX detail screenshots** (1-2):
+  - First placeOrder `0x79d4b340ad448571a5b7ea461d33ebff81128c67e124700cff636bfd08157dcf`
+  - Latest IOC-taker — bukti pattern berhasil
+
+**Nice-to-have (boost narrative):**
+- [ ] **Bot console screenshot** — running cycle log dengan `[SIM OK]`, `[BROADCAST]`, `[FILLED]` lines berurutan (bukti safety pattern bukan kata-kata)
+- [ ] **Architecture diagram** — export dari README.md jadi PNG terpisah untuk Google Doc
+- [ ] **Loom video 2-3 menit** (optional tapi powerful):
+  - (0:00-0:30) intro: "DreamTend, multi-agent IOC bot"
+  - (0:30-1:30) screen-record bot running 5-10 cycles live
+  - (1:30-2:30) leaderboard tab + explorer tab side-by-side
+- [ ] **Sweep evidence** (post Day-7, capture after liquidator):
+  - Before sweep: vault balances dari `check-all-vaults.ts` output
+  - After sweep: wallet USDso jump
+  - Final PnL realized
+
+**Yang sudah otomatis terdokumentasi (tidak perlu kerja manual):**
+- `docs/run-logs/` (kalau ada log files)
+- Git commit history (sudah CI-clean)
+- TX hashes (sudah embedded di `SUBMISSION_DRAFT.md`)
+
+**Lainnya:**
 - [ ] README final polish
 - [ ] Code comments cleanup
-- [ ] Architecture diagram
+- [ ] 5th feedback report (sudah ada — verify)
 
 ### Day 7 — 2026-06-01 (SUBMISSION DAY)
 **Target:** Liquidate + submit

@@ -1,10 +1,11 @@
 # DreamTend
 
-> *Tending the order book on DreamDEX.*
+> _Tending the order book on DreamDEX._
 
 Autonomous multi-wallet trading agent for the [DreamDEX](https://dreamdex.io) Alpha Trading Competition on the [Somnia](https://somnia.network) blockchain. Built in TypeScript on top of [ethers v6](https://docs.ethers.org/v6/).
 
 **Status during the competition:**
+
 - 🏆 Reached **rank 1** on the live leaderboard 2026-05-27 16:42 UTC with ~$1,356 USDso volume
 - 📝 5 polished feedback reports submitted to engineering (covering doc gaps, ABI mismatches, and pool UX)
 - 🧱 Multi-wallet fleet architecture per Emre's "AI agents wallet" guidance
@@ -14,7 +15,7 @@ Autonomous multi-wallet trading agent for the [DreamDEX](https://dreamdex.io) Al
 
 ## Why "DreamTend"?
 
-A market maker is a gardener — it doesn't pick winners, it *tends the order book*: trims overgrown spreads, plants liquidity on both sides, weeds out stale quotes. DreamTend automates that gardening across multiple wallets simultaneously, and combines it with an aggressive IOC-taker module that captures external liquidity on the higher-priced pairs (WETH, WBTC).
+A market maker is a gardener — it doesn't pick winners, it _tends the order book_: trims overgrown spreads, plants liquidity on both sides, weeds out stale quotes. DreamTend automates that gardening across multiple wallets simultaneously, and combines it with an aggressive IOC-taker module that captures external liquidity on the higher-priced pairs (WETH, WBTC).
 
 ---
 
@@ -28,8 +29,8 @@ A market maker is a gardener — it doesn't pick winners, it *tends the order bo
                 ↓                               ↓
         ┌─────────────────┐           ┌──────────────────┐
         │  IOC-LOOP       │           │  CROSS-LOOP      │
-        │  (trader-6      │           │  (self-cross     │
-        │   style)        │           │   bidirectional) │
+        │  (IOC-taker     │           │  (self-cross     │
+        │   alternator)   │           │   bidirectional) │
         │                 │           │                  │
         │ • WETH:USDso    │           │ • SOMI:USDso     │
         │ • IOC takers    │           │ • W3 maker + Reg │
@@ -131,7 +132,7 @@ scripts/
   probe-pool.ts              getPoolParams() + book snapshot for any pool
   inspect-tx.ts              Decode logs/topics/data from a known tx hash
 
-  ioc-loop.ts                Trader-6-style: IOC taker loop, alternates BUY/SELL
+  ioc-loop.ts                IOC taker loop, alternates BUY/SELL
   cross-loop.ts              Self-cross with bidirectional auto-switch
   self-cross.ts              Earlier single-direction self-cross prototype
   swap-stt-to-usdso.ts       Testnet bootstrap helper (limited by empty book)
@@ -200,17 +201,17 @@ Raw observations + incident notes live in `docs/feedback/OBSERVATIONS.md`.
 
 As of 2026-05-27 17:00 UTC (Day 2):
 
-| Metric | Value |
-|---|---|
-| Mainnet TX broadcast | ~550 |
-| On-chain volume contribution | ~$1,400 USDso |
-| Leaderboard rank | #1 |
-| Fleet wallets active | 5 (W0–W4) |
-| Real-money loss | ~$0.05 USDso self-cross leakage |
-| Recoverable at Day-7 sweep | ~$44 USDso (wallet + vault + fleet) |
-| Successful fill rate (IOC loops) | 100% over 450+ cycles |
-| Bugs caught by safety net | 1 silent-rejection event topic mismatch (recovered) |
-| Feedback reports submitted | 5 polished + 2 supplementary in OBSERVATIONS.md |
+| Metric                           | Value                                               |
+| -------------------------------- | --------------------------------------------------- |
+| Mainnet TX broadcast             | ~550                                                |
+| On-chain volume contribution     | ~$1,400 USDso                                       |
+| Leaderboard rank                 | #1                                                  |
+| Fleet wallets active             | 5 (W0–W4)                                           |
+| Real-money loss                  | ~$0.05 USDso self-cross leakage                     |
+| Recoverable at Day-7 sweep       | ~$44 USDso (wallet + vault + fleet)                 |
+| Successful fill rate (IOC loops) | 100% over 450+ cycles                               |
+| Bugs caught by safety net        | 1 silent-rejection event topic mismatch (recovered) |
+| Feedback reports submitted       | 5 polished + 2 supplementary in OBSERVATIONS.md     |
 
 ---
 
@@ -224,4 +225,3 @@ As of 2026-05-27 17:00 UTC (Day 2):
 
 - DreamDEX team — Anjali Singh, Emre Yıldız, Tom, Dave, Paul
 - Somnia Network — Agentic L1 vision
-- Trader-6 (`0xF181...1406`) for the WETH:USDso IOC-taker pattern observed via on-chain inspection

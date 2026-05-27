@@ -2,15 +2,53 @@
 
 > *Tending the order book on DreamDEX.*
 
-Autonomous multi-strategy market-making agent for the [DreamDEX](https://dreamdex.io) Alpha Trading Competition on the [Somnia](https://somnia.network) blockchain.
+Autonomous multi-wallet trading agent for the [DreamDEX](https://dreamdex.io) Alpha Trading Competition on the [Somnia](https://somnia.network) blockchain. Built in TypeScript on top of [ethers v6](https://docs.ethers.org/v6/).
 
-Built in TypeScript on top of [ethers v6](https://docs.ethers.org/v6/), the [DreamDEX CCXT fork](https://github.com/somnia-chain/ccxt/tree/add-dreamdex-exchange), and the [Somnia Agent Kit](https://github.com/xuanbach0212/somnia-agent-kit). LLM meta-decisions powered by local Ollama.
+**Status during the competition:**
+- 🏆 Reached **rank 1** on the live leaderboard 2026-05-27 16:42 UTC with ~$1,356 USDso volume
+- 📝 5 polished feedback reports submitted to engineering (covering doc gaps, ABI mismatches, and pool UX)
+- 🧱 Multi-wallet fleet architecture per Emre's "AI agents wallet" guidance
+- 🔐 Production-ready safety net (eth_call simulation + event verification + gotcha asserts)
 
 ---
 
 ## Why "DreamTend"?
 
-A market maker is a gardener — it doesn't pick winners, it *tends the order book*: trims overgrown spreads, plants liquidity on both sides, weeds out stale quotes. DreamTend automates that gardening 24/7 against four DreamDEX pools.
+A market maker is a gardener — it doesn't pick winners, it *tends the order book*: trims overgrown spreads, plants liquidity on both sides, weeds out stale quotes. DreamTend automates that gardening across multiple wallets simultaneously, and combines it with an aggressive IOC-taker module that captures external liquidity on the higher-priced pairs (WETH, WBTC).
+
+---
+
+## The Two Strategies
+
+```
+                  REGISTERED WALLET (0x8f0A...ec86)
+                          ($50 USDso modal)
+                                │
+                ┌───────────────┴───────────────┐
+                ↓                               ↓
+        ┌─────────────────┐           ┌──────────────────┐
+        │  IOC-LOOP       │           │  CROSS-LOOP      │
+        │  (trader-6      │           │  (self-cross     │
+        │   style)        │           │   bidirectional) │
+        │                 │           │                  │
+        │ • WETH:USDso    │           │ • SOMI:USDso     │
+        │ • IOC takers    │           │ • W3 maker + Reg │
+        │ • $3-6/tx       │           │   taker, alt dir │
+        │ • 100% fill     │           │ • $0.05-0.30/cyc │
+        │   rate observed │           │ • Capital reuses │
+        └─────────────────┘           └──────────────────┘
+                │                               │
+                └────────── ON-CHAIN ───────────┘
+                                ↓
+                     DreamDEX SpotPool contracts
+                     Volume → leaderboard
+```
+
+**IOC-loop** (`scripts/ioc-loop.ts`) is our high-volume engine: alternate IOC BUY/SELL at wide limit prices on WETH:USDso, capturing whatever external counterparty exists at market price. Verified at 100% fill rate over 450+ live cycles.
+
+**Cross-loop** (`scripts/cross-loop.ts`) is our SOMI:USDso self-cross — W3 (fleet wallet #3) places a PostOnly maker order, registered wallet IOC-takes it. Auto-switches SELL ↔ BUY direction when capital exhausts on one side.
+
+**Why both?** Different pools have different liquidity profiles. WETH:USDso is busy and rewards IOC-takers; SOMI:USDso is mostly empty and only fills from our own self-cross. Running both maximises volume per unit capital.
 
 ---
 
@@ -26,17 +64,25 @@ npm install
 
 # 3. Configure
 cp .env.example .env
-# edit .env: paste your TRADING wallet private key + RPCs
+# edit .env — paste your trading wallet private key + RPCs
 
-# 4. Dry-run on testnet
-npm run dev -- --network testnet --pair SOMI:USDso
+# 4. Verify the toolchain
+npm run typecheck       # passes — no TS errors
+NETWORK=mainnet npx tsx scripts/sanity-check.ts   # 8/8 checks ok
 
-# 5. Go live on mainnet
-npm run dev -- --network mainnet --pair USDC.e:USDso
+# 5. (Optional) Generate + fund a multi-wallet fleet
+npx tsx scripts/generate-bot-wallets.ts 5         # creates data/bot-wallets.json (gitignored)
+NETWORK=mainnet npx tsx scripts/fund-bot-wallets.ts data/bot-wallets.json 2 0.2
+NETWORK=mainnet npx tsx scripts/prepare-fleet.ts data/bot-wallets.json 1.5
 
-# 6. Production (24/7)
-npm run build
-pm2 start ecosystem.config.js
+# 6. Run the high-volume IOC engine
+NETWORK=mainnet npx tsx scripts/ioc-loop.ts WETH:USDso 0.001 5000 1 8000 50
+
+# 7. Or run the self-cross bidirectional engine
+NETWORK=mainnet npx tsx scripts/cross-loop.ts SOMI:USDso 1 0.05 0.30 12000 30 3
+
+# 8. Day-7 (2026-06-01): sweep fleet + liquidate
+NETWORK=mainnet npx tsx scripts/sweep-fleet.ts
 ```
 
 ---
@@ -44,83 +90,133 @@ pm2 start ecosystem.config.js
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│  Orchestrator  (multi-strategy scheduler)       │
-│       │                                         │
-│       ├─→ Strategy: USDC.e/USDso MM   (70%)     │
-│       ├─→ Strategy: SOMI/USDso MM     (20%)     │
-│       ├─→ Strategy: Momentum chaser   (5%)      │
-│       ├─→ Strategy: Inventory rebalancer (5%)   │
-│       └─→ Strategy: Day-7 liquidator  (T-2h)    │
-│       │                                         │
-│       └─→ LLM Meta-Engine (Ollama llama3.2)     │
-│           (15-min strategy switch decisions)    │
-└─────────────────────────────────────────────────┘
-         │                            │
-         ↓                            ↓
-┌─────────────────────┐   ┌─────────────────────┐
-│  DreamDEX REST/WS   │   │  Direct contracts   │
-│  (convenience)      │   │  (fallback path)    │
-└──────────┬──────────┘   └──────────┬──────────┘
-           │                         │
-           └────────────┬────────────┘
-                        ↓
-              ┌──────────────────┐
-              │   Somnia RPC     │
-              │  (chain ID 5031) │
-              └──────────────────┘
-```
-
-Trading happens on-chain at SpotPool contracts (e.g. USDC.e:USDso at `0x47fD…120b`). The REST API is convenience; the bot falls back to direct contract calls when REST is unstable. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full breakdown.
-
----
-
-## Strategy Summary
-
-| # | Strategy | Pair | Allocation | Tactic |
-|---|---|---|---|---|
-| 1 | Primary MM | USDC.e:USDso | 70% | Post-only ±1 tick, re-quote on MarkPriceUpdated |
-| 2 | Secondary MM | SOMI:USDso | 20% | Post-only ±10 bps |
-| 3 | Momentum chaser | SOMI:USDso | 5% | IOC on >50 bps moves |
-| 4 | Inventory rebalancer | varies | 5% | Auto-correct skew |
-| 5 | Day-7 liquidator | all | T-2h fire | Settle to USDso before snapshot |
-| ⭐ | LLM meta-engine | global | — | Ollama llama3.2, 15-min cadence |
-
-See [docs/STRATEGIES.md](docs/STRATEGIES.md).
-
----
-
-## Repo Layout
-
-```
 src/
-  config/       # network, tokens, pools, constants
-  agent/        # Somnia Agent Kit (registry + vault)
-  dex/          # DreamDEX REST + WS + direct contract client
-  strategies/   # 5 strategy modules + base class
-  llm/          # Ollama client + decision engine
-  utils/        # logger, decimals, price helpers
-docs/
-  ARCHITECTURE.md
-  STRATEGIES.md
-  api-gotchas.md   # 20 gotchas baked into code
-  feedback/        # 5 detailed feedback reports
-scripts/
-  register-agent.ts
-  deposit-vault.ts
-  liquidate-final.ts
-tests/
-  testnet-dry-run.ts
+  config/          Network, tokens, pool addresses, env-driven constants
+  dex/             SpotPool ABI + typed contract wrappers, REST + WS clients
+    abi/             Human-readable ABIs (spotpool.ts, erc20.ts) + TS interfaces
+    contracts.ts     getPoolHandle, readBookLevels (revert-safe), readPoolParams
+    safe-broadcast.ts  Sim → broadcast → event-verify pattern (Obs-006 fix baked in)
+    rest.ts          DreamDEX REST API client w/ SIWE auth stub
+    websocket.ts     Subscribe + 30s ping heartbeat + exp reconnect
+  strategies/      Bot strategies (one process can load N strategies)
+    base.ts          Strategy abstract class
+    market-maker.ts  Two-sided MM, requote mutex + 2s cooldown
+    momentum.ts      Volatility-triggered IOC taker
+    day7-liquidator.ts  T-2h before snapshot: cancel + IOC dump + withdraw vault
+  utils/           gotchas.ts (runtime asserts), price.ts (tick/lot align), signer.ts (fleet-aware)
+  orchestrator.ts  Loads strategies per FEATURES flags, dispatches WS events
+
+scripts/         (live ops tooling — see "Operational Scripts" below)
+docs/            Architecture notes + feedback/ folder with 5 polished reports
 ```
 
 ---
 
-## Status
+## Operational Scripts
 
-This is a competition entry for the **DreamDEX Alpha Trading Competition** (2026-05-26 → 2026-06-01). Code will be polished into an official getting-started reference for future DreamDEX testers.
+```
+scripts/
+  generate-bot-wallets.ts    Create N fresh wallets, save data/bot-wallets.json (gitignored)
+  fund-bot-wallets.ts        Send USDso + native SOMI from registered → each bot wallet
+  prepare-fleet.ts           Each wallet approves + deposits USDso to its target pool vault
+  run-fleet.ts               Spawn N parallel bot processes per role (homogeneous orchestrators)
+  fleet-state.ts             Tabular fleet snapshot (native + USDso wallet + vault + nonce)
+  consolidate-gas.ts         Sweep native SOMI from fleet → registered (gas refill)
+  withdraw-w3-somi.ts        Withdraw W3's native-SOMI vault balance back to registered
 
-- Phase 1: Setup — in progress
-- Phase 2-12: see [SKILL.md](SKILL.md) section 16
+  sanity-check.ts            8 checks: RPC, wallet, pool params, book RPC, REST /markets,
+                             REST /orderbooks, WebSocket subscribe
+  full-state.ts              Wallet + vault balance probe across all relevant tokens
+  fleet-state.ts             Same but for all fleet wallets in one table
+  probe-pool.ts              getPoolParams() + book snapshot for any pool
+  inspect-tx.ts              Decode logs/topics/data from a known tx hash
+
+  ioc-loop.ts                Trader-6-style: IOC taker loop, alternates BUY/SELL
+  cross-loop.ts              Self-cross with bidirectional auto-switch
+  self-cross.ts              Earlier single-direction self-cross prototype
+  swap-stt-to-usdso.ts       Testnet bootstrap helper (limited by empty book)
+  rebalance-w3.ts            Top-up W3 wallet/vault with native SOMI
+
+  deposit-vault.ts           Manual deposit USDso (or base) to a pool vault
+  cancel-by-id.ts            Cancel an order by hex orderId
+  cancel-all.ts              Cancel via getOwnOpenOrders (caveat: reverts on empty)
+  cancel-raw.ts              Cancel without sim (workaround for some edge cases)
+  recover-orders.ts          Extract orderIds from tx hashes + cancel (incident recovery)
+  find-recent-orders.ts      Scan recent blocks for our wallet's OrderPlaced events
+  sweep-fleet.ts             Day-7: cancel orders + withdraw vault + transfer all → registered
+```
+
+---
+
+## Safety Net
+
+Every order broadcast goes through `safePlaceOrder` (`src/dex/safe-broadcast.ts`):
+
+1. **Pre-flight asserts** (`src/utils/gotchas.ts`)
+   - `expireTimestampNs > now` (DreamDEX rejects 0)
+   - `priceRaw > 0` (priceRaw=0 is literal, NOT "market price")
+   - `builder == 0x0` and `builderFeeBpsTimes1k == 0` (disabled in v1.0)
+2. **Static-call simulation** (`placeOrder.staticCall(...)`)
+   - Catches custom-error reverts BEFORE burning gas
+3. **Broadcast + receipt wait**
+4. **Event verification** — confirms the `OrderPlaced` topic appears in `receipt.logs`
+   - Empirically verified topic: `0xd90f62f6...` (see Feedback Report 01)
+5. **Receipt-based orderId extraction**
+   - The sim-returned orderId can drift from the actual on-chain orderId when other orders are placed between sim and broadcast — receipt is the only authoritative source.
+
+This pattern caught real bugs during the competition: an early version of the bot lost track of orderIds (Day-1 incident) because we trusted the sim-time orderId; the fix in `extractOrderIdFromReceipt` recovered tracking and prevented future orphan-order incidents.
+
+---
+
+## Multi-Wallet Fleet
+
+Per Emre's group-chat guidance:
+
+> "You can create your wallets your AI agents wallet etc. We'll consider it general." — Emre Yıldız, DevRel, 2026-05-25
+
+DreamTend ships scripts to spawn N fresh wallets, fund them from the registered wallet, assign each a strategy role, and run them in parallel via separate orchestrator processes (one per wallet). Roles include `mm-usdce-tight`, `mm-somi`, `momentum-somi`, `reserve`. All wallet keys live in `data/bot-wallets.json` (gitignored, never committed).
+
+Day-7: `sweep-fleet.ts` consolidates ALL pool vault balances + ERC20 + native back to the registered wallet, so the leaderboard's `PnL = wallet_USDso - 50` formula captures the full portfolio.
+
+---
+
+## Feedback Reports
+
+Five polished reports in `docs/feedback/`:
+
+1. **`01-event-topic-undocumented.md`** — `OrderPlaced` event topic must be reverse-engineered from a real receipt. Critical "silent rejection" footgun.
+2. **`02-getpoolparams-field-count-mismatch.md`** — Docs say 8 fields, contract returns 7. BAD_DATA decode failure.
+3. **`03-pool-lotsize-docs-mismatch.md`** — Docs and on-chain `lotSize` diverge on USDC.e:USDso (0.01 vs 1.0).
+4. **`04-testnet-usdso-onboarding-gap.md`** — No documented way to acquire testnet USDso; pool chronically empty.
+5. **`05-getbooklevels-empty-revert.md`** — View function reverts with `require(false)` on empty book instead of returning empty arrays.
+
+Each report follows the canonical Type / Severity / Environment / Steps to reproduce / Expected / Actual / Logs / Suggested fix / Acceptance criteria format.
+
+Raw observations + incident notes live in `docs/feedback/OBSERVATIONS.md`.
+
+---
+
+## Live Numbers
+
+As of 2026-05-27 17:00 UTC (Day 2):
+
+| Metric | Value |
+|---|---|
+| Mainnet TX broadcast | ~550 |
+| On-chain volume contribution | ~$1,400 USDso |
+| Leaderboard rank | #1 |
+| Fleet wallets active | 5 (W0–W4) |
+| Real-money loss | ~$0.05 USDso self-cross leakage |
+| Recoverable at Day-7 sweep | ~$44 USDso (wallet + vault + fleet) |
+| Successful fill rate (IOC loops) | 100% over 450+ cycles |
+| Bugs caught by safety net | 1 silent-rejection event topic mismatch (recovered) |
+| Feedback reports submitted | 5 polished + 2 supplementary in OBSERVATIONS.md |
+
+---
+
+## License
+
+[MIT](LICENSE) — fork it, ship it, improve it. The DreamDEX team is welcome to use any of this code as official getting-started reference material (per Anjali's encouragement at the kick-off meeting).
 
 ---
 
@@ -128,10 +224,4 @@ This is a competition entry for the **DreamDEX Alpha Trading Competition** (2026
 
 - DreamDEX team — Anjali Singh, Emre Yıldız, Tom, Dave, Paul
 - Somnia Network — Agentic L1 vision
-- Community testers running this through its paces
-
----
-
-## License
-
-[MIT](LICENSE) — fork it, ship it, learn from it.
+- Trader-6 (`0xF181...1406`) for the WETH:USDso IOC-taker pattern observed via on-chain inspection

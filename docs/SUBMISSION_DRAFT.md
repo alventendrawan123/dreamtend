@@ -11,7 +11,7 @@
 
 ### A.1 Mission Statement
 
-DreamTend is an autonomous multi-wallet trading agent built specifically for the DreamDEX alpha competition. It combines four complementary mechanisms — IOC-taker engine, bidirectional self-cross, multi-wallet fleet orchestration, and Day-7 liquidator — to maximize on-chain trading volume while maintaining a controlled PnL profile and reusable open-source code.
+DreamTend is an autonomous trading agent built for the DreamDEX alpha competition. It combines four complementary mechanisms — a counterparty-agnostic IOC-taker engine, a bidirectional self-cross engine, multi-wallet fleet orchestration, and a scheduled Day-7 liquidator — all wired through a 5-step sim-before-broadcast safety net. The agent's goal is to **maximize on-chain volume per unit of starting capital**, keep PnL friction below 5% over the competition window, and ship the resulting codebase as a reusable open-source reference for future DreamDEX integrators.
 
 ### A.2 Operational Discipline: Dedicated Trading Wallet
 
@@ -51,7 +51,7 @@ Per round-trip:
   • TX count:        2
 ```
 
-Verified at **100% fill rate across 800+ cycles** on the WETH/USDso pool. The pool's external order book provided counterparties for every single attempt during competition hours.
+Verified live across **~1,000 cycles** on WETH/USDso during competition hours. Early small-qty runs (qty=0.001-0.002 WETH) saw 100% fill rate; later large-qty runs (qty=0.005 WETH at qty escalation) saw 91% fill rate (200-cycle batch closed at 182/200 fills, total reported volume ~$2,048). The misses were short-window liquidity drops, not protocol-level rejections — `staticCall` correctly skipped those cycles so zero gas was wasted on reverts.
 
 #### A.3.2 Bidirectional Self-Cross Engine (Secondary)
 
@@ -69,7 +69,7 @@ Cycle pattern (SOMI/USDso pool):
 
 This pattern generates volume without requiring external counterparties, at the cost of moving capital between our own wallets — which is recovered at Day-7 by `scripts/sweep-fleet.ts`.
 
-This engine is dormant in the current competition phase (WETH IOC is more efficient) but remains in the repo as a backup mechanism.
+The two engines are **complementary, not redundant**: IOC-taker captures all available external liquidity (high volume per cycle, ~$3-6/tx) while self-cross provides guaranteed fill on quiet pools (small volume per cycle, ~$0.05-0.30/tx, but resilient to any market condition). DreamTend prioritized IOC during the competition because WETH/USDso external liquidity was consistent; the self-cross engine remains hot-swappable for pools or time-windows when external counterparties go quiet.
 
 ### A.4 Safety Net
 
@@ -121,7 +121,7 @@ Anyone can query `getAgent(45)` on the registry contract to verify DreamTend's r
 
 ### A.7 LLM Meta-Decision Layer
 
-DreamTend integrates with Ollama (local LLM, default llama3.2) for strategy-level meta-decisions every ~15 minutes:
+DreamTend integrates with Ollama (local LLM, default llama3.2) as a **modular, feature-flag-gated** strategy-level meta-decision layer:
 
 ```
 src/llm/decision-engine.ts
@@ -131,7 +131,14 @@ src/llm/decision-engine.ts
 Actions: continue | pause | widen_spread | tighten_spread | switch_pair | stop
 ```
 
-Health check + JSON-mode prompting + graceful fallback to "continue" when Ollama unavailable. Demo script (`scripts/llm-demo.ts`) runs three scenarios end-to-end.
+Architecture choices favored shippability + resilience:
+
+- **Transport-isolated client** (`src/llm/ollama-client.ts`): pure HTTP wrapper around `/api/tags` (health) and `/api/generate` (JSON-mode prompts). Configurable model, timeout, base URL via env vars.
+- **Graceful degradation**: every LLM call wrapped in try/catch with conservative `"continue"` fallback. Bot never crashes due to Ollama downtime.
+- **Cached health-check** (60s TTL): avoids spamming local API.
+- **Demo-as-test** (`scripts/llm-demo.ts`): runs three scenarios (quiet market, active market, volatility spike) end-to-end. Works in fallback mode (Ollama not installed) by gracefully returning `"continue"` — useful as a CI sanity check.
+
+**Wiring status**: the engine ships as a reusable module; it is **not** auto-wired into the IOC alternator's hot path (a deliberate Phase 6 decision — wiring the meta-layer requires more A/B observation to avoid letting the LLM override profitable patterns). The integration demonstrates the "AI-driven agent" narrative Anjali highlighted at kickoff, and the modular separation (transport / decision-layer / demo) is reusable as a template for any future Somnia agent.
 
 ### A.8 Day-7 Liquidator
 
@@ -151,18 +158,26 @@ To showcase, in order of demo value (full source: `https://github.com/alventendr
 
 ### B.1 The Safe Broadcast Pattern (`src/dex/safe-broadcast.ts`)
 
-The 3-step pattern that prevents the silent-rejection footgun:
+The 5-step pattern that prevents the silent-rejection footgun (detail in A.4 above; condensed core below):
 
 ```typescript
+// 1. Pre-flight gotcha assertions (expireNs, priceRaw, builder, qty-lot)
+assertExpireNs(expireNs); assertPriceRawNonZero(priceRaw);
+assertBuilderDisabled(ZERO, 0n); assertQtyMultipleOfLot(qty, lotRaw);
+
+// 2. Simulate via staticCall — catches custom-error reverts before burning gas
 const [simSuccess, simOrderId] = await contract.placeOrder.staticCall(...args);
 if (!simSuccess) throw new Error("Sim fail — abort, save gas");
 
+// 3. Broadcast + wait for receipt
 const tx = await contract.placeOrder(...args);
 const receipt = await tx.wait();
 
+// 4. Event verification — confirm OrderPlaced topic in receipt.logs
+assertOrderPlacedEvent(receipt, ORDER_PLACED_TOPIC);
+
+// 5. Receipt-based orderId extraction (sim-time orderId can drift)
 const realOrderId = extractOrderIdFromReceipt(receipt) ?? simOrderId;
-// Use receipt-based orderId — sim-time orderId can drift if other orders
-// were placed between sim and broadcast
 ```
 
 ### B.2 Gotcha Validator (`src/utils/gotchas.ts`)
@@ -202,11 +217,12 @@ for (let cycle = 1; cycle <= MAX_CYCLES; cycle++) {
 
 ### B.4 Capital Recycling (`scripts/buy-somi.ts` + `extract-w2-somi.ts`)
 
-When the registered wallet's native SOMI ran low mid-competition, two scripts together restored 12 SOMI of gas budget without external top-ups:
+When the registered wallet's native SOMI ran low mid-competition (down to 0.027 SOMI after thousands of IOC cycles), two scripts together restored ~12 SOMI of gas budget **without external top-ups** — entirely from competition-allocated capital re-routed across asset types:
 
-- `buy-somi.ts`: IOC-buy native SOMI from the registered wallet's USDso balance via the SOMI/USDso pool
-- `extract-w2-somi.ts`: Withdraw idle SOMI parked in fleet wallet W2's pool vault back to the registered wallet
-- Verified: gained 4.997 SOMI for $0.81 USDso (BUY at market $0.16, well below limit $0.30) + recovered 7 SOMI from W2 vault
+- `scripts/buy-somi.ts`: IOC-buy native SOMI from the registered wallet's USDso via the SOMI/USDso pool. Verified: gained 4.997 SOMI for $0.81 USDso (filled at market $0.162, well below the $0.30 limit thanks to external sellers). TX `0x97353994ff4678ddc7ccc75ab0dfe9c82806f4e47f94066b589cddd1efebc23e`.
+- `scripts/extract-w2-somi.ts`: Withdraw idle SOMI parked in fleet wallet W2's SOMI/USDso vault back to the registered wallet (recovered 7 SOMI).
+
+The two restored ~12 SOMI runway = ~24,000 additional transaction headroom, and the buy-back leg also generated incremental on-chain volume. **Operational note for the team:** this is not external top-up (rules forbid that) — it's a swap of competition-funded USDso for SOMI, both denominated within the same starting allocation, executed on-chain.
 
 ### B.5 Day-7 Liquidator (`src/strategies/day7-liquidator.ts`)
 
@@ -220,37 +236,57 @@ Scheduled cron-style strategy with three steps: cancel-all → IOC dump → with
 
 ### C.1 Leaderboard Rank Progression (during competition)
 
-| Time | Rank | TX | Volume | PnL |
+| Time | Rank | TX | Volume | PnL (leaderboard view) |
 |---|---|---|---|---|
 | 2026-05-26 evening (Day 1 mid) | 5 | 13 | $2.50 | -$2.00 |
 | 2026-05-27 14:30 (Day 2 mid) | 4 | 298 | $531.27 | -$19.34 |
 | 2026-05-27 16:18 | 2 | 398 | $947.93 | -$19.40 |
 | 2026-05-27 16:42 | 1 | 498 | $1,356.27 | -$19.44 |
-| 2026-05-27 17:30+ | 1 | 909+ | $3,031+ | -$24.59 |
-| Day-7 snapshot (after sweep) | TBD | TBD | TBD | recovered to ~-$5 to -$8 |
+| 2026-05-27 17:30 (Day 2 late) | 1 | 909+ | $3,031+ | -$24.59 |
+| 2026-05-28 02:45 (Day 3 early) | 1 | 2,148 | ~$13,000 est | -$25.65 |
+| 2026-06-01 snapshot (after Day-7 sweep) | TBD | TBD+ | TBD | projected ~-$3 to -$5 |
+
+**Reading the PnL column.** The leaderboard's PnL formula is `wallet_USDso - 50`, which only sees the registered wallet's USDso balance — not vault deposits, not ERC20 inventory in other tokens, not capital parked in fleet sub-wallets. Mid-competition the displayed -$25.65 reflects ~$22 of capital intentionally **displaced** to support multi-wallet trading + IOC inventory cycling, not lost. True trading-friction PnL is ~-$3 to -$5; Day-7 `sweep-fleet.ts` + the Day-7 liquidator (A.8) consolidates everything back so the snapshot reflects the full portfolio.
 
 ### C.2 On-Chain Proof
 
 - **Registered wallet:** `0x8f0A24AE910D4B89C4422b6884d71739DBC1ec86`
 - **Explorer URL:** https://explorer.somnia.network/address/0x8f0A24AE910D4B89C4422b6884d71739DBC1ec86
-- **Sample trade TX (first mainnet placeOrder):** `0x79d4b340ad448571a5b7ea461d33ebff81128c67e124700cff636bfd08157dcf`
-- **Sample IOC-taker TX:** `0x5e10e3c6b7096e75aa1be60b1a397881b6ef64d12ae3793336f1bd6073dcc293`
-- **Somnia Agent registration TX (testnet):** `0xc2d7f3f14649a9d02f156fb4383036200dbe41554741858e1101ac8b46e2403e`
+- **First mainnet `placeOrder`** (proof of integration boot): `0x79d4b340ad448571a5b7ea461d33ebff81128c67e124700cff636bfd08157dcf`
+- **Sample IOC-taker fill** (high-volume engine): `0x5e10e3c6b7096e75aa1be60b1a397881b6ef64d12ae3793336f1bd6073dcc293`
+- **Sample buy-somi capital recycle TX** (USDso → native SOMI swap, no external top-up): `0x97353994ff4678ddc7ccc75ab0dfe9c82806f4e47f94066b589cddd1efebc23e`
+- **Somnia Agent #45 registration TX (Shannon testnet):** `0xc2d7f3f14649a9d02f156fb4383036200dbe41554741858e1101ac8b46e2403e`
+- **Total TX broadcast by registered wallet (as of 2026-05-28 02:45):** 2,148
 
 ### C.3 Repository Statistics
 
-- 17+ commits across 7 phase milestones, all on `main`, all CI-clean
-- 26 operational scripts in `scripts/`
-- 100% TypeScript with strict mode enabled
-- All gotchas documented in `SKILL.md` + encoded as runtime asserts
+- 19 commits across 7 phase milestones, all on `main`, all CI-clean (TypeScript strict mode passes)
+- 35 operational scripts in `scripts/` (covering: order placement, vault management, fleet ops, capital recycling, recovery, monitoring, registration, LLM demo, Day-7 liquidation)
+- 100% TypeScript with strict mode enabled — no `any`, no implicit `any`, no unchecked indexed access
+- All 12 discovered gotchas documented in `SKILL.md` §12 + encoded as runtime asserts in `src/utils/gotchas.ts`
+- 5 polished feedback reports + 7 raw observations (`docs/feedback/OBSERVATIONS.md`)
 
 ---
 
 ## Section D — GitHub Repository
 
-**Public repo:** https://github.com/alventendrawan123/dreamtend
-**License:** MIT — fork it, learn from it, ship it
-**Documentation:** README.md (architecture + quickstart) + SKILL.md (operational reference)
+- **Public repo:** https://github.com/alventendrawan123/dreamtend
+- **License:** MIT — fork it, learn from it, ship it
+- **Documentation:**
+  - `README.md` — architecture diagram, two-strategy explanation, quickstart commands, live numbers
+  - `SKILL.md` — operational reference (20 sections from architecture mental model to decision log)
+  - `docs/feedback/` — 5 polished feedback reports + 7 raw observations
+  - `docs/SUBMISSION_DRAFT.md` — this document (will be lifted into the Google Doc on Day 7)
+- **Quickstart** (from `README.md`):
+
+  ```bash
+  git clone https://github.com/alventendrawan123/dreamtend && cd dreamtend
+  npm install
+  cp .env.example .env  # paste private key + RPCs
+  npm run typecheck
+  NETWORK=mainnet npx tsx scripts/sanity-check.ts     # 8/8 ok
+  NETWORK=mainnet npx tsx scripts/ioc-loop.ts WETH:USDso 0.001 5000 1 7000 200
+  ```
 
 ---
 
@@ -284,13 +320,17 @@ Bug: `getBookLevels(isBid, depth)` reverts with bare `require(false)` on empty b
 
 ## Section F — Operational Notes for the DreamDEX Team
 
-Three operational learnings from running DreamTend at scale that might inform future SDK design:
+Five operational learnings from running DreamTend at scale that might inform future SDK / docs work:
 
-1. **Always read pool params on startup.** Hardcoding lot/tick/minQty from docs is dangerous. DreamTend now reads `getPoolParams()` at boot and uses on-chain values as source of truth. Consider shipping a docs-build-time check that flags drift between the spec page and actual chain state.
+1. **Always read pool params on startup.** Hardcoding lot/tick/minQty from docs is dangerous (Feedback Report 03). DreamTend reads `getPoolParams()` at boot and uses on-chain values as source of truth. Consider shipping a docs-build-time check that flags drift between the spec page and actual chain state.
 
-2. **Sim-before-broadcast is the only safe broadcast pattern.** Without it, custom-error reverts cost real gas. The pattern is simple (`staticCall(...args)` then check `success`), but every integrator must rediscover it.
+2. **Sim-before-broadcast is the only safe broadcast pattern.** Without it, custom-error reverts cost real gas. The pattern is simple (`staticCall(...args)` then check `success`), but every integrator must rediscover it — a one-paragraph docs section + a code snippet would save days of debugging.
 
-3. **Event topic publishing is a wedge.** A single docs page listing all event signatures + their `keccak256` topic hashes would prevent the silent-rejection footgun for every future integrator. Even better: an authoritative ABI JSON file at `https://docs.dreamdex.io/abi/SpotPool.json`.
+3. **Event topic publishing is a wedge** (Feedback Report 01). A single docs page listing all event signatures + their `keccak256` topic hashes would prevent the silent-rejection footgun for every future integrator. Even better: an authoritative ABI JSON file at `https://docs.dreamdex.io/abi/SpotPool.json` that integrators can `wget` and trust.
+
+4. **`getBookLevels` / `getOwnOpenOrders` reverts on empty book are a UX paper-cut** (Feedback Report 05). Returning `([], [])` instead of `require(false)` lets clients treat "empty" as a value rather than a failure mode. We had to wrap every level-read call in try/catch; an empty-tuple return would have eliminated that.
+
+5. **The vault model needs a "PnL realized" view.** The on-leaderboard formula `wallet_USDso - 50` is simple and clear, but it surprises integrators who deposit to vaults expecting that to count. DreamTend's Day-7 liquidator + sweep-fleet exists exclusively to translate vault holdings back to wallet for the snapshot. A leaderboard view that included `vault_USDso` (or a separate "realized vs deposited" column) would let strategies that genuinely market-make on the book — and therefore hold inventory in vault — compete fairly with pure taker strategies that keep everything in wallet.
 
 ---
 

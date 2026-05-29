@@ -264,7 +264,7 @@ Scheduled cron-style strategy with three steps: cancel-all → IOC dump → with
 - 35 operational scripts in `scripts/` (covering: order placement, vault management, fleet ops, capital recycling, recovery, monitoring, registration, LLM demo, Day-7 liquidation)
 - 100% TypeScript with strict mode enabled — no `any`, no implicit `any`, no unchecked indexed access
 - All 12 discovered gotchas documented in `SKILL.md` §12 + encoded as runtime asserts in `src/utils/gotchas.ts`
-- 5 polished feedback reports + 7 raw observations (`docs/feedback/OBSERVATIONS.md`)
+- 19 polished feedback reports + 7 raw observations (`docs/feedback/OBSERVATIONS.md`)
 
 ---
 
@@ -275,7 +275,7 @@ Scheduled cron-style strategy with three steps: cancel-all → IOC dump → with
 - **Documentation:**
   - `README.md` — architecture diagram, two-strategy explanation, quickstart commands, live numbers
   - `SKILL.md` — operational reference (20 sections from architecture mental model to decision log)
-  - `docs/feedback/` — 5 polished feedback reports + 7 raw observations
+  - `docs/feedback/` — 19 polished feedback reports + 7 raw observations
   - `docs/SUBMISSION_DRAFT.md` — this document (will be lifted into the Google Doc on Day 7)
 - **Quickstart** (from `README.md`):
 
@@ -292,7 +292,7 @@ Scheduled cron-style strategy with three steps: cancel-all → IOC dump → with
 
 ## Section E — Feedback Reports
 
-**13 polished feedback reports** covering critical doc gaps, ABI mismatches, on-chain UX issues, competition mechanics, and SDK/protocol design opportunities discovered through DreamTend's live operation. Each report follows the canonical Type / Severity / Environment / Steps to Reproduce / Expected / Actual / Logs / Suggested Fix / Acceptance Criteria format. Severity matrix:
+**19 polished feedback reports** covering critical doc gaps, ABI mismatches, on-chain UX issues, competition mechanics, incentive-mechanism gaps, and SDK/protocol design opportunities discovered through DreamTend's live operation + a verification audit of the live docs. Each report follows the canonical Type / Severity / Environment / Steps to Reproduce / Expected / Actual / Logs / Suggested Fix / Acceptance Criteria format. Severity matrix:
 
 | Tier | Reports | Severity mix |
 |---|---|---|
@@ -300,6 +300,9 @@ Scheduled cron-style strategy with three steps: cancel-all → IOC dump → with
 | Polished from observations (E.6-E.7) | 06-07 | 1 High, 1 Medium |
 | New from live learnings (E.8-E.10) | 08-10 | 3 High |
 | Extended / new discoveries (E.11-E.13) | 11-13 | 3 Medium |
+| Docs audit (E.14-E.19) | 14-19 | 1 High, 4 Medium, 1 Low |
+
+> Reports 14-19 came from a verification audit of the current live docs: each candidate was re-checked against the docs before filing, and several earlier-suspected issues were confirmed **already fixed** by the team (SelfMatchingOption enum now documented, stop-order cost dynamic-warning present, builder-codes `BuilderCodesNotSupported` explained) — so they were deliberately NOT filed. Only verified-still-valid gaps are reported below.
 
 ### E.1 — `OrderPlaced` Event Signature Undocumented (Critical)
 Source: `docs/feedback/01-event-topic-undocumented.md`
@@ -353,7 +356,31 @@ Bug: Stop registry addresses are referenced in chat / contract specs but the ABI
 Source: `docs/feedback/13-multi-wallet-aggregation-policy.md`
 Bug: The "fleet wallets are allowed" policy lives only in the alpha group chat. New entrants joining mid-competition or future waves will not know multi-wallet is permitted unless they read the chat scrollback. Needs to be in public Competition Rules.
 
-**Plus 7 raw observations** (`docs/feedback/OBSERVATIONS.md`) — the working notebook these formal reports were polished from.
+### E.14 — Yield Algorithm Parameters Undocumented (σ, Cadence, Eligibility) (High)
+Source: `docs/feedback/14-yield-algorithm-params-undocumented.md`
+Gap: The maker-yield page gives the Gaussian formula + 3 weighting factors but omits every quantitative input — σ value, settlement cadence, eligibility (PostOnly? min size? early-cancel penalty?). Integrators can't model APR or design market-making, pushing them to taker-only strategies.
+
+### E.15 — `markPrice` EMA Window (`updateIntervalSec`) Undocumented (Medium)
+Source: `docs/feedback/15-markprice-ema-window-undocumented.md`
+Gap: Stop triggers fire off the EMA-smoothed `markPrice`, but the deployed `updateIntervalSec` / EMA window is unpublished (type bound only `>0..86400`). Traders can't predict stop-trigger latency or markPrice lag.
+
+### E.16 — MCP Server Advertised But No Endpoint Published (Medium)
+Source: `docs/feedback/16-mcp-server-url-not-published.md`
+Gap: Docs promote a "native MCP server" for agent integration but publish no URL/endpoint. The advertised agentic feature is unusable.
+
+### E.17 — `AGENTS.md` / `SKILL.md` Agent Contracts Return 404 (Medium)
+Source: `docs/feedback/17-agents-skill-md-404.md`
+Bug: Docs reference `AGENTS.md` and `SKILL.md` as auto-discoverable agent contracts; both URLs 404. Auto-discovering agents hit dead links. (Pairs with E.16 — the whole agentic surface is marketed but not wired up.)
+
+### E.18 — Spot Trading Page Is a Stub (No Matching-Engine Walkthrough) (Medium)
+Source: `docs/feedback/18-spot-page-stub-no-matching-engine.md`
+Gap: The core Spot page is ~300-400 words and mentions the matching engine once in passing — no price-time-priority rules, order-flow lifecycle, or settlement walkthrough. No conceptual on-ramp for the most important concept of an order-book DEX.
+
+### E.19 — CCXT Bindings: TypeScript-Only, Not Published to npm (Low)
+Source: `docs/feedback/19-ccxt-bindings-ts-only-not-on-npm.md`
+Gap: The CCXT integration installs only from a GitHub fork branch (not npm) and only generates JS/TS bindings — Python/Go/PHP/C# (the dominant CCXT cohort) are excluded. Disclosed in docs, so a roadmap/polish item.
+
+**Plus 7 raw observations** (`docs/feedback/OBSERVATIONS.md`) — the working notebook the earlier reports were polished from.
 
 ---
 

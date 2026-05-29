@@ -264,7 +264,7 @@ Scheduled cron-style strategy with three steps: cancel-all → IOC dump → with
 - 35 operational scripts in `scripts/` (covering: order placement, vault management, fleet ops, capital recycling, recovery, monitoring, registration, LLM demo, Day-7 liquidation)
 - 100% TypeScript with strict mode enabled — no `any`, no implicit `any`, no unchecked indexed access
 - All 12 discovered gotchas documented in `SKILL.md` §12 + encoded as runtime asserts in `src/utils/gotchas.ts`
-- 19 polished feedback reports + 7 raw observations (`docs/feedback/OBSERVATIONS.md`)
+- 21 polished feedback reports + 7 raw observations (`docs/feedback/OBSERVATIONS.md`)
 
 ---
 
@@ -275,7 +275,7 @@ Scheduled cron-style strategy with three steps: cancel-all → IOC dump → with
 - **Documentation:**
   - `README.md` — architecture diagram, two-strategy explanation, quickstart commands, live numbers
   - `SKILL.md` — operational reference (20 sections from architecture mental model to decision log)
-  - `docs/feedback/` — 19 polished feedback reports + 7 raw observations
+  - `docs/feedback/` — 21 polished feedback reports + 7 raw observations
   - `docs/SUBMISSION_DRAFT.md` — this document (will be lifted into the Google Doc on Day 7)
 - **Quickstart** (from `README.md`):
 
@@ -292,7 +292,7 @@ Scheduled cron-style strategy with three steps: cancel-all → IOC dump → with
 
 ## Section E — Feedback Reports
 
-**19 polished feedback reports** covering critical doc gaps, ABI mismatches, on-chain UX issues, competition mechanics, incentive-mechanism gaps, and SDK/protocol design opportunities discovered through DreamTend's live operation + a verification audit of the live docs. Each report follows the canonical Type / Severity / Environment / Steps to Reproduce / Expected / Actual / Logs / Suggested Fix / Acceptance Criteria format. Severity matrix:
+**21 polished feedback reports** covering critical doc gaps, ABI mismatches, on-chain UX issues, competition mechanics, incentive-mechanism gaps, metric-integrity concerns, and SDK/protocol design opportunities — discovered through DreamTend's live operation + a verification audit of the live docs. Each report follows the canonical Type / Severity / Environment / Steps to Reproduce / Expected / Actual / Logs / Suggested Fix / Acceptance Criteria format. Severity matrix:
 
 | Tier | Reports | Severity mix |
 |---|---|---|
@@ -301,6 +301,7 @@ Scheduled cron-style strategy with three steps: cancel-all → IOC dump → with
 | New from live learnings (E.8-E.10) | 08-10 | 3 High |
 | Extended / new discoveries (E.11-E.13) | 11-13 | 3 Medium |
 | Docs audit (E.14-E.19) | 14-19 | 1 High, 4 Medium, 1 Low |
+| Competition-integrity (E.20-E.21) | 20-21 | 1 High, 1 Medium |
 
 > Reports 14-19 came from a verification audit of the current live docs: each candidate was re-checked against the docs before filing, and several earlier-suspected issues were confirmed **already fixed** by the team (SelfMatchingOption enum now documented, stop-order cost dynamic-warning present, builder-codes `BuilderCodesNotSupported` explained) — so they were deliberately NOT filed. Only verified-still-valid gaps are reported below.
 
@@ -379,6 +380,14 @@ Gap: The core Spot page is ~300-400 words and mentions the matching engine once 
 ### E.19 — CCXT Bindings: TypeScript-Only, Not Published to npm (Low)
 Source: `docs/feedback/19-ccxt-bindings-ts-only-not-on-npm.md`
 Gap: The CCXT integration installs only from a GitHub fork branch (not npm) and only generates JS/TS bindings — Python/Go/PHP/C# (the dominant CCXT cohort) are excluded. Disclosed in docs, so a roadmap/polish item.
+
+### E.20 — Volume Metric Inflatable via Cross-Wallet Self-Dealing (High)
+Source: `docs/feedback/20-volume-metric-gameable-wash-trading.md`
+Concern: The on-chain `SelfMatchingOption` prevents single-wallet self-match, but cross-wallet self-dealing (operator's wallet A makes, wallet B takes) is undetected and counts fully toward the volume KPI. The headline metric is gameable; genuine flow isn't distinguished from manufactured volume. Constructive fix: discount self-dealing volume via on-chain funding-graph linkage / counterparty-diversity weighting. (Filed with our own `cross-loop.ts` as the illustrative example — non-accusatory.)
+
+### E.21 — Mainnet Pools Have Extended Dead Periods, No Baseline Liquidity (Medium)
+Source: `docs/feedback/21-mainnet-pools-no-baseline-liquidity.md`
+Gap: All four mainnet pools observed empty (both sides) for multi-hour stretches, with no seeded baseline liquidity / market-maker-of-last-resort (confirmed in docs). Genuine takers stall during dead windows while self-dealers keep generating volume — structurally pushing competitors toward wash trading (compounds E.20). Fix: DevRel MM-of-last-resort + concrete yield params (E.14) to attract organic resting liquidity.
 
 **Plus 7 raw observations** (`docs/feedback/OBSERVATIONS.md`) — the working notebook the earlier reports were polished from.
 

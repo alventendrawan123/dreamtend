@@ -15,6 +15,11 @@ const BUY_PRICE = process.argv[4] ?? "5000";
 const SELL_PRICE = process.argv[5] ?? "1";
 const CYCLE_INTERVAL_MS = Number(process.argv[6] ?? "8000");
 const MAX_CYCLES = Number(process.argv[7] ?? "60");
+// Optional USDso hysteresis guard: when wallet USDso drops below FLOOR, force
+// SELL-only until it recovers above CEILING. Prevents drift draining USDso to
+// the PnL floor on ASK-heavy pools. 0 = disabled (default).
+const USDSO_FLOOR = Number(process.argv[8] ?? "0");
+const USDSO_CEILING = Number(process.argv[9] ?? "0");
 
 const ORDER_FILLED_TOPIC = ethers.id(
   "OrderFilled(uint128,uint128,uint256,uint256,uint256)",
@@ -98,11 +103,25 @@ async function main(): Promise<void> {
 
   // Start with BUY (might need to bootstrap base balance)
   let nextSide: "buy" | "sell" = "buy";
+  let sellOnlyMode = false; // hysteresis guard state (see USDSO_FLOOR/CEILING)
 
   for (let cycle = 1; cycle <= MAX_CYCLES && !stopped; cycle += 1) {
     attempts += 1;
     const usdsoBal: bigint = await (quoteErc.balanceOf as ethers.BaseContractMethod<[string], bigint, bigint>)(wallet.address);
     const baseBal: bigint = await (baseErc.balanceOf as ethers.BaseContractMethod<[string], bigint, bigint>)(wallet.address);
+
+    // USDso hysteresis guard: force SELL-only below FLOOR until recovered above CEILING.
+    if (USDSO_FLOOR > 0) {
+      const usdsoHuman = Number(ethers.formatUnits(usdsoBal, 18));
+      if (!sellOnlyMode && usdsoHuman < USDSO_FLOOR) {
+        sellOnlyMode = true;
+        logger.warn({ cycle, usdso: usdsoHuman.toFixed(2), floor: USDSO_FLOOR }, "Guard: USDso below floor → SELL-only mode");
+      } else if (sellOnlyMode && usdsoHuman >= USDSO_CEILING) {
+        sellOnlyMode = false;
+        logger.info({ cycle, usdso: usdsoHuman.toFixed(2), ceiling: USDSO_CEILING }, "Guard: USDso recovered → resume alternating");
+      }
+      if (sellOnlyMode) nextSide = "sell";
+    }
 
     if (nextSide === "buy") {
       const need = (qtyRaw * buyPriceRaw) / 10n ** BigInt(baseTok.decimals);

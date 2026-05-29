@@ -61,3 +61,5 @@ temp/
 # Draft commit messages (delete after use)
 COMMIT_MSG.txt
 COMMIT_MSG_*.txt
+
+.claude/settings.local.json

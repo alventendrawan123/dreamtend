@@ -46,12 +46,17 @@ async function main(): Promise<void> {
   console.log(`Scanning blocks ${fromBlock} → ${latest} (${BLOCK_LOOKBACK} block lookback)`);
   console.log();
 
-  const ownerTopic = ethers.zeroPadValue(target, 32);
-  const iface = new ethers.Interface([
-    "event OrderPlaced(uint128 indexed orderId, address indexed owner, bool isBid, uint8 orderType, uint256 price, uint256 quantity, uint64 expireTimestampNs)",
-  ]);
-
+  const targetLow = target.toLowerCase();
   const allEvents: OrderPlacedDecoded[] = [];
+
+  // NOTE: The deployed SpotPool contract emits OrderPlaced with ONLY ONE indexed
+  // topic (orderId). The docs/ABI claim `owner` is also indexed, but on-chain
+  // it lives in `data` slot 2. See Feedback Report 22 for the full mismatch
+  // analysis. We therefore filter topic0 only, then decode owner client-side.
+  //
+  // data layout observed (8 × 32-byte slots):
+  //   [0] orderId duplicate   [1] isBid   [2] owner   [3] orderType
+  //   [4] price               [5] quantity   [6] expireTimestampNs   [7] undocumented
 
   for (const sym of Object.keys(POOLS[net.name])) {
     const pool = POOLS[net.name][sym]!;
@@ -64,21 +69,30 @@ async function main(): Promise<void> {
           address: pool.poolAddress,
           fromBlock: start,
           toBlock: end,
-          topics: [ORDER_PLACED_TOPIC, null, ownerTopic],
+          topics: [ORDER_PLACED_TOPIC],
         });
         for (const log of logs) {
-          const parsed = iface.parseLog({ topics: log.topics as string[], data: log.data });
-          if (!parsed) continue;
+          if (log.data.length < 2 + 64 * 6) continue;
+          // slot 2 (chars 130..194) — last 20 bytes = address
+          const ownerSlot = log.data.slice(130, 194);
+          const ownerAddr = "0x" + ownerSlot.slice(24).toLowerCase();
+          if (ownerAddr !== targetLow) continue;
+
+          const isBid = BigInt("0x" + log.data.slice(66, 130)) === 1n;
+          const orderType = Number(BigInt("0x" + log.data.slice(194, 258)));
+          const price = BigInt("0x" + log.data.slice(258, 322));
+          const quantity = BigInt("0x" + log.data.slice(322, 386));
+
           allEvents.push({
             pool: sym,
             poolAddr: pool.poolAddress,
             blockNumber: log.blockNumber,
             txHash: log.transactionHash,
-            orderId: parsed.args[0] as bigint,
-            isBid: parsed.args[2] as boolean,
-            orderType: Number(parsed.args[3]),
-            price: parsed.args[4] as bigint,
-            quantity: parsed.args[5] as bigint,
+            orderId: BigInt(log.topics[1]),
+            isBid,
+            orderType,
+            price,
+            quantity,
           });
           chunkEvents++;
         }

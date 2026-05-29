@@ -7,7 +7,7 @@ Autonomous multi-wallet trading agent for the [DreamDEX](https://dreamdex.io) Al
 **Status during the competition:**
 
 - 🏆 Reached **rank 1** on the live leaderboard 2026-05-27 16:42 UTC with ~$1,356 USDso volume
-- 📝 21 polished feedback reports submitted to engineering (doc gaps, ABI mismatches, pool UX, incentive-mechanism gaps, agent-integration 404s, metric-integrity)
+- 📝 22 polished feedback reports submitted to engineering (doc gaps, ABI mismatches, pool UX, incentive-mechanism gaps, agent-integration 404s, metric-integrity)
 - 🧱 Multi-wallet fleet architecture per Emre's "AI agents wallet" guidance
 - 🔐 Production-ready safety net (eth_call simulation + event verification + gotcha asserts)
 
@@ -109,7 +109,7 @@ src/
   orchestrator.ts  Loads strategies per FEATURES flags, dispatches WS events
 
 scripts/         (live ops tooling — see "Operational Scripts" below)
-docs/            Architecture notes + feedback/ folder with 21 polished reports
+docs/            Architecture notes + feedback/ folder with 22 polished reports
 ```
 
 ---
@@ -212,7 +212,7 @@ As of 2026-05-27 17:00 UTC (Day 2):
 | Recoverable at Day-7 sweep       | ~$40 USDso (wallet + vault + fleet)                 |
 | Successful fill rate (IOC loops) | 92-100% during active hours                         |
 | Bugs caught by safety net        | 1 silent-rejection event topic mismatch (recovered) |
-| Feedback reports submitted       | 21 polished + 7 raw observations in OBSERVATIONS.md |
+| Feedback reports submitted       | 22 polished + 7 raw observations in OBSERVATIONS.md |
 
 ---
 

@@ -9,17 +9,25 @@ import { buildExpireNs } from "../src/utils/gotchas.js";
 import { ORDER_TYPE, SELF_MATCH, MS_PER_HOUR } from "../src/config/constants.js";
 import { logger } from "../src/utils/logger.js";
 
-const POOL_SYMBOL = process.argv[2] ?? "WETH:USDso";
-const QTY_BASE = process.argv[3] ?? "0.001";
-const BUY_PRICE = process.argv[4] ?? "5000";
-const SELL_PRICE = process.argv[5] ?? "1";
-const CYCLE_INTERVAL_MS = Number(process.argv[6] ?? "8000");
-const MAX_CYCLES = Number(process.argv[7] ?? "60");
-// Optional USDso hysteresis guard: when wallet USDso drops below FLOOR, force
-// SELL-only until it recovers above CEILING. Prevents drift draining USDso to
-// the PnL floor on ASK-heavy pools. 0 = disabled (default).
-const USDSO_FLOOR = Number(process.argv[8] ?? "0");
-const USDSO_CEILING = Number(process.argv[9] ?? "0");
+// SOMI:USDso variant of ioc-loop. Handles the native-base asymmetry
+// (feedback report 10): SELL leg requires msg.value === qtyRaw, BUY does not.
+// Uses provider.getBalance for native SOMI balance, not ERC20 balanceOf.
+//
+// Usage: tsx scripts/ioc-loop-somi.ts <qtySomi> <buyLimit> <sellLimit>
+//                                     <cycleMs> <maxCycles> <usdsoFloor> <usdsoCeiling>
+//                                     <gasReserveSomi>
+//
+// Example: tsx scripts/ioc-loop-somi.ts 5 0.18 0.10 5000 600 20 25 5
+
+const POOL_SYMBOL = "SOMI:USDso";
+const QTY_BASE = process.argv[2] ?? "5";
+const BUY_PRICE = process.argv[3] ?? "0.18";
+const SELL_PRICE = process.argv[4] ?? "0.10";
+const CYCLE_INTERVAL_MS = Number(process.argv[5] ?? "5000");
+const MAX_CYCLES = Number(process.argv[6] ?? "600");
+const USDSO_FLOOR = Number(process.argv[7] ?? "0");
+const USDSO_CEILING = Number(process.argv[8] ?? "0");
+const GAS_RESERVE_SOMI = Number(process.argv[9] ?? "5");
 
 const ORDER_FILLED_TOPIC = ethers.id(
   "OrderFilled(uint128,uint128,uint256,uint256,uint256)",
@@ -33,52 +41,34 @@ const ERC20_ABI = [
 
 async function main(): Promise<void> {
   const net = getActiveNetwork();
-  const provider = new ethers.JsonRpcProvider(net.rpc, {
-    chainId: net.chainId,
-    name: net.name,
-  });
+  const provider = new ethers.JsonRpcProvider(net.rpc, { chainId: net.chainId, name: net.name });
   const wallet = new ethers.Wallet(process.env.PRIVATE_KEY!, provider);
   const pool = getPool(net.name, POOL_SYMBOL);
   const baseTok = getToken(net.name, pool.base);
   const quoteTok = getToken(net.name, pool.quote);
 
+  if (!baseTok.isNative) {
+    throw new Error(`This variant requires a native-base pool. ${POOL_SYMBOL} base is not flagged isNative.`);
+  }
+
   const c = new ethers.Contract(pool.poolAddress, SPOTPOOL_ABI, wallet) as SpotPoolContract;
-  const baseErc = new ethers.Contract(baseTok.address, ERC20_ABI, wallet);
   const quoteErc = new ethers.Contract(quoteTok.address, ERC20_ABI, wallet);
 
   const qtyRaw = ethers.parseUnits(QTY_BASE, baseTok.decimals);
   const buyPriceRaw = ethers.parseUnits(BUY_PRICE, quoteTok.decimals);
   const sellPriceRaw = ethers.parseUnits(SELL_PRICE, quoteTok.decimals);
+  const gasReserveRaw = ethers.parseUnits(GAS_RESERVE_SOMI.toString(), 18);
 
-  // Ensure approvals (USDso + base token to pool) — one-time setup
+  // Approve USDso (for BUY leg only — SELL leg uses native msg.value)
   const usdsoApprove = (qtyRaw * buyPriceRaw) / 10n ** BigInt(baseTok.decimals) * 1000n;
-  const baseApprove = qtyRaw * 1000n;
   const usdsoAllow: bigint = await (quoteErc.allowance as ethers.BaseContractMethod<
-    [string, string],
-    bigint,
-    bigint
+    [string, string], bigint, bigint
   >)(wallet.address, pool.poolAddress);
   if (usdsoAllow < usdsoApprove / 100n) {
     logger.info({ amount: ethers.formatUnits(usdsoApprove, quoteTok.decimals) }, "Approving USDso to pool");
     const tx = await (quoteErc.approve as ethers.BaseContractMethod<
-      [string, bigint],
-      boolean,
-      ethers.ContractTransactionResponse
+      [string, bigint], boolean, ethers.ContractTransactionResponse
     >)(pool.poolAddress, usdsoApprove);
-    await tx.wait();
-  }
-  const baseAllow: bigint = await (baseErc.allowance as ethers.BaseContractMethod<
-    [string, string],
-    bigint,
-    bigint
-  >)(wallet.address, pool.poolAddress);
-  if (baseAllow < baseApprove / 100n) {
-    logger.info({ amount: ethers.formatUnits(baseApprove, baseTok.decimals) }, `Approving ${baseTok.symbol} to pool`);
-    const tx = await (baseErc.approve as ethers.BaseContractMethod<
-      [string, bigint],
-      boolean,
-      ethers.ContractTransactionResponse
-    >)(pool.poolAddress, baseApprove);
     await tx.wait();
   }
 
@@ -90,8 +80,11 @@ async function main(): Promise<void> {
       sellLimit: SELL_PRICE,
       cycleMs: CYCLE_INTERVAL_MS,
       maxCycles: MAX_CYCLES,
+      usdsoFloor: USDSO_FLOOR,
+      usdsoCeiling: USDSO_CEILING,
+      gasReserveSomi: GAS_RESERVE_SOMI,
     },
-    "IOC loop starting — IOC-taker alternator",
+    "SOMI IOC loop starting — native-base IOC-taker alternator",
   );
 
   let totalVolumeRaw = 0n;
@@ -106,32 +99,20 @@ async function main(): Promise<void> {
   const heartbeat = setInterval(() => {
     logger.info(
       { cycle: lastCycleNum, successes: successfulFills, totalVolume: ethers.formatUnits(totalVolumeRaw, 18) },
-      "♥ heartbeat",
+      "♥ heartbeat (SOMI)",
     );
   }, 30000);
 
-  // Start with BUY (might need to bootstrap base balance)
   let nextSide: "buy" | "sell" = "buy";
-  let sellOnlyMode = false; // hysteresis guard state (see USDSO_FLOOR/CEILING)
+  let sellOnlyMode = false;
 
   for (let cycle = 1; cycle <= MAX_CYCLES && !stopped; cycle += 1) {
     lastCycleNum = cycle;
     const cycleStart = Date.now();
     attempts += 1;
-
-    // Gas pre-flight: native SOMI is fuel for every broadcast.
-    const nativeBal = await provider.getBalance(wallet.address);
-    if (nativeBal < ethers.parseUnits("0.5", 18)) {
-      logger.error(
-        { cycle, nativeSomi: ethers.formatUnits(nativeBal, 18) },
-        "Gas SOMI critical (<0.5) — aborting loop, refuel needed",
-      );
-      break;
-    }
     const usdsoBal: bigint = await (quoteErc.balanceOf as ethers.BaseContractMethod<[string], bigint, bigint>)(wallet.address);
-    const baseBal: bigint = await (baseErc.balanceOf as ethers.BaseContractMethod<[string], bigint, bigint>)(wallet.address);
+    const nativeSomi: bigint = await provider.getBalance(wallet.address);
 
-    // USDso hysteresis guard: force SELL-only below FLOOR until recovered above CEILING.
     if (USDSO_FLOOR > 0) {
       const usdsoHuman = Number(ethers.formatUnits(usdsoBal, 18));
       if (!sellOnlyMode && usdsoHuman < USDSO_FLOOR) {
@@ -152,8 +133,12 @@ async function main(): Promise<void> {
         continue;
       }
     } else {
-      if (baseBal < qtyRaw) {
-        logger.warn({ cycle, baseBal: ethers.formatUnits(baseBal, baseTok.decimals) }, `Insufficient ${baseTok.symbol} for SELL — switching to BUY`);
+      // SELL: need native SOMI = qtyRaw + gas reserve
+      if (nativeSomi < qtyRaw + gasReserveRaw) {
+        logger.warn(
+          { cycle, nativeSomi: ethers.formatUnits(nativeSomi, 18), need: ethers.formatUnits(qtyRaw + gasReserveRaw, 18) },
+          "Insufficient native SOMI (below qty+gasReserve) — switching to BUY",
+        );
         nextSide = "buy";
         continue;
       }
@@ -174,12 +159,16 @@ async function main(): Promise<void> {
       0n,
     ];
 
+    // KEY DIFFERENCE FROM WETH ioc-loop: msg.value = qtyRaw for SELL (native base).
+    const msgValue: bigint = isBid ? 0n : qtyRaw;
+
     logger.info(
       {
         cycle,
         side: nextSide,
         qty: QTY_BASE,
         limit: isBid ? BUY_PRICE : SELL_PRICE,
+        msgValue: ethers.formatUnits(msgValue, 18),
         attempts,
         successes: successfulFills,
         totalVolume: ethers.formatUnits(totalVolumeRaw, 18),
@@ -189,20 +178,19 @@ async function main(): Promise<void> {
 
     try {
       const [simOk, simId] = await withTimeout(
-        c.placeTakerOrderWithoutVault.staticCall(...args, { value: 0n }),
+        c.placeTakerOrderWithoutVault.staticCall(...args, { value: msgValue }),
         15000,
         "sim",
       );
       if (!simOk) {
         logger.info({ cycle, simId: simId.toString() }, "No external liquidity — IOC sim returns false, skipping");
-        // Try other side next
         nextSide = isBid ? "sell" : "buy";
         await sleep(CYCLE_INTERVAL_MS);
         continue;
       }
 
       const tx = await withTimeout(
-        c.placeTakerOrderWithoutVault(...args, { value: 0n }),
+        c.placeTakerOrderWithoutVault(...args, { value: msgValue }),
         30000,
         "broadcast",
       );
@@ -219,7 +207,6 @@ async function main(): Promise<void> {
           const dataHex = log.data.replace(/^0x/, "");
           const qtyFilled = BigInt("0x" + dataHex.slice(0, 64));
           filledQty += qtyFilled;
-          // executedVolumeRaw approximated as qty × limit price; actual could differ if fills at better
           executedVolumeRaw += (qtyFilled * priceRaw) / 10n ** BigInt(baseTok.decimals);
         }
       }
@@ -236,16 +223,15 @@ async function main(): Promise<void> {
             totalVolume: ethers.formatUnits(totalVolumeRaw, 18),
             successes: successfulFills,
           },
-          `✓ IOC ${nextSide.toUpperCase()} filled`,
+          `✓ IOC ${nextSide.toUpperCase()} filled (SOMI)`,
         );
       } else {
         logger.warn({ cycle, txHash: receipt.hash }, "IOC tx succeeded but no fill events");
       }
 
-      // Toggle side for next cycle
       nextSide = isBid ? "sell" : "buy";
     } catch (err) {
-      logger.error({ cycle, err: (err as Error).message }, "IOC cycle failed");
+      logger.error({ cycle, err: (err as Error).message }, "SOMI IOC cycle failed");
     }
 
     const cycleDur = Date.now() - cycleStart;
@@ -264,7 +250,7 @@ async function main(): Promise<void> {
       successRate: attempts > 0 ? `${((successfulFills / attempts) * 100).toFixed(0)}%` : "n/a",
       totalVolume: ethers.formatUnits(totalVolumeRaw, 18),
     },
-    "IOC loop finished",
+    "SOMI IOC loop finished",
   );
 }
 

@@ -19,8 +19,8 @@
     "format": "prettier --write 'src/**/*.ts' 'docs/**/*.md'",
     "register-agent": "tsx scripts/register-agent.ts",
     "deposit-vault": "tsx scripts/deposit-vault.ts",
-    "liquidate-final": "tsx scripts/liquidate-final.ts",
-    "inventory": "tsx scripts/inventory.ts"
+    "sanity-check": "tsx scripts/sanity-check.ts",
+    "sweep-fleet": "tsx scripts/sweep-fleet.ts"
   },
   "keywords": [
     "dreamdex",

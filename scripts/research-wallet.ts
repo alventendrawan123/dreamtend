@@ -73,6 +73,8 @@ async function main(): Promise<void> {
         });
         for (const log of logs) {
           if (log.data.length < 2 + 64 * 6) continue;
+          const topic1 = log.topics[1];
+          if (!topic1) continue;
           // slot 2 (chars 130..194) — last 20 bytes = address
           const ownerSlot = log.data.slice(130, 194);
           const ownerAddr = "0x" + ownerSlot.slice(24).toLowerCase();
@@ -88,7 +90,7 @@ async function main(): Promise<void> {
             poolAddr: pool.poolAddress,
             blockNumber: log.blockNumber,
             txHash: log.transactionHash,
-            orderId: BigInt(log.topics[1]),
+            orderId: BigInt(topic1),
             isBid,
             orderType,
             price,
@@ -182,20 +184,23 @@ async function main(): Promise<void> {
     const sampledTs = new Map<number, number>();
     for (let i = 0; i < fullSampleBlocks.length; i += sampleEvery) {
       const b = fullSampleBlocks[i];
+      if (b === undefined) continue;
       const blk = await provider.getBlock(b);
       if (blk) sampledTs.set(b, Number(blk.timestamp));
     }
     // Approximate timestamps by nearest sampled block
     const sampledBlocks = Array.from(sampledTs.keys()).sort((a, b) => a - b);
     function approxTs(bn: number): number {
+      const first = sampledBlocks[0];
+      if (first === undefined) return 0;
       // Find nearest sampled
-      let nearest = sampledBlocks[0];
+      let nearest: number = first;
       let best = Math.abs(bn - nearest);
       for (const sb of sampledBlocks) {
         const d = Math.abs(bn - sb);
         if (d < best) { best = d; nearest = sb; }
       }
-      return sampledTs.get(nearest)!;
+      return sampledTs.get(nearest) ?? 0;
     }
     const perMinute = new Map<string, number>();
     for (const e of sortedByBlock) {

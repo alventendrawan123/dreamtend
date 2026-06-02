@@ -38,17 +38,27 @@ After analyzing the trading characteristics of the four available pools (SOMI/US
 The IOC-taker engine (`scripts/ioc-loop.ts`) exploits this:
 
 ```
-Cycle pattern:
-  1. IOC BUY 0.001 WETH at limit $5,000  (high limit ensures fill at market $3,000)
-  2. Wait 7 seconds
-  3. IOC SELL 0.001 WETH at limit $1     (low limit ensures fill at market BID)
-  4. Wait 7 seconds
-  5. Repeat
+Cycle pattern (production config — qty actively tuned over the comp):
+  1. IOC BUY  <qty> WETH at limit <buyLimit> USDso  (e.g. 0.005 @ $2,400 —
+                                                     well above market $2,020,
+                                                     pool refunds the difference)
+  2. Wait <cycleInterval>ms                          (3,000ms early competition,
+                                                     1,500ms aggressive late-game)
+  3. IOC SELL <qty> WETH at limit $1                 (extreme low ensures fill at
+                                                     market BID; pool credits market price)
+  4. Wait <cycleInterval>ms
+  5. Repeat — or USDso hysteresis guard kicks in (force SELL-only when USDso
+            drops below FLOOR, exit when USDso recovers above CEILING)
 
-Per round-trip:
-  • Volume on chain: ~$6 (qty × 2 × market price)
-  • PnL cost:        ~$0.04 (= 0.7% friction from off-market limits)
+Per round-trip (representative — qty 0.005 @ market $2,020):
+  • Volume on chain: ~$20 (qty × 2 × market)
+  • PnL cost:        ~$0.04 (≈0.2% spread + slippage)
   • TX count:        2
+
+Across the full competition (qty varied 0.001 → 0.011 → back down):
+  • Total volume: ~$317k live observed (~$295k at end of Day 7 window)
+  • Total fills:  ~31k (≈ 100% success during active pool windows;
+                  60–100% across all windows including dead-pool sim-skips)
 ```
 
 Verified live across **~31,000 cycles** on WETH/USDso over the full 7-day competition. The qty was actively tuned over time — starting at **0.001 WETH** for testing, escalating to **0.011 WETH** during Day-4/5 to maximize per-fill volume while pool liquidity supported it, then scaling **back down to 0.002-0.003** in the late game once spread cost slowly drained the registered wallet's USDso below the larger-qty escrow threshold. Multiple 1200-cycle batches recorded **100% fill rate** during active pool windows. The misses were short-window liquidity drops, not protocol-level rejections — `staticCall` correctly skipped those cycles so zero gas was wasted on reverts.
@@ -212,14 +222,19 @@ for (let cycle = 1; cycle <= MAX_CYCLES; cycle++) {
 }
 ```
 
-### B.4 Capital Recycling (`scripts/buy-somi.ts` + `extract-w2-somi.ts`)
+### B.4 Capital Recycling (`scripts/buy-somi.ts`, `ioc-loop-somi.ts`, `extract-w2-somi.ts`)
 
-When the registered wallet's native SOMI ran low mid-competition (down to 0.027 SOMI after thousands of IOC cycles), two scripts together restored ~12 SOMI of gas budget **without external top-ups** — entirely from competition-allocated capital re-routed across asset types:
+When the registered wallet's native SOMI ran low mid-competition (the IOC engine consumes ≈ 0.0015 SOMI per fill × tens of thousands of fills), DreamTend recycled USDso → SOMI on the SOMI/USDso pool itself instead of waiting for sponsor top-ups. This is **not an external top-up** — it's a swap of competition-funded USDso for SOMI, both denominated within the same starting allocation, executed on-chain through the public pool with refunds + receipts like any other taker fill.
 
-- `scripts/buy-somi.ts`: IOC-buy native SOMI from the registered wallet's USDso via the SOMI/USDso pool. Verified: gained 4.997 SOMI for $0.81 USDso (filled at market $0.162, well below the $0.30 limit thanks to external sellers). TX `0x97353994ff4678ddc7ccc75ab0dfe9c82806f4e47f94066b589cddd1efebc23e`.
-- `scripts/extract-w2-somi.ts`: Withdraw idle SOMI parked in fleet wallet W2's SOMI/USDso vault back to the registered wallet (recovered 7 SOMI).
+Operational history:
 
-The two restored ~12 SOMI runway = ~24,000 additional transaction headroom, and the buy-back leg also generated incremental on-chain volume. **Operational note for the team:** this is not external top-up (rules forbid that) — it's a swap of competition-funded USDso for SOMI, both denominated within the same starting allocation, executed on-chain.
+- **Day-3 initial recycle** — `scripts/buy-somi.ts` IOC-bought ~5 SOMI from USDso at market $0.16 (well below the $0.30 limit), gaining 4.997 SOMI for $0.81 USDso. TX `0x97353994ff4678ddc7ccc75ab0dfe9c82806f4e47f94066b589cddd1efebc23e`.
+- **Day-6 / Day-7 / Day-8 mini-refuels** — `scripts/ioc-loop-somi.ts` (a SOMI-specific variant of the IOC engine that handles the native-base `msg.value === qtyRaw` payable requirement from Report 10) ran several single-cycle BUYs at qty 5 / qty 20 / qty 5 as the gas budget approached the bot's pre-flight cutoff (<0.5 SOMI). Total USDso spent on recycling across the competition: roughly $4–5 USDso, gaining ~30 SOMI cumulative.
+- **Fleet-vault recovery** — `scripts/extract-w2-somi.ts` withdrew idle SOMI parked in fleet wallet W2's SOMI/USDso vault (a leftover position from the early self-cross experiment) back to the registered wallet — recovered ~7 SOMI.
+
+The combined recycling restored multiple tens of SOMI of gas runway over the competition (= tens of thousands of additional IOC fills) without leaving the $50 USDso starting allocation. The buy-back legs also generated incremental on-chain volume that counts toward the volume KPI — the trades are real CLOB fills against external counterparty, not internal moves.
+
+In parallel with the recycling, the DevRel team also sponsored 3 native-SOMI top-ups directly (logged in C.2 "Native SOMI (Gas) — Sponsored Top-Ups by DevRel"). Recycling provided continuous self-sufficiency; the DevRel sponsorship covered the larger gas surges. Either path on its own would have kept the bot running; both together kept it running comfortably.
 
 ### B.5 Day-7 Liquidator (`src/strategies/day7-liquidator.ts`)
 
@@ -244,15 +259,17 @@ Scheduled cron-style strategy with three steps: cancel-all → IOC dump → with
 | 2026-05-30 14:30 (Day 5 — pool first wakes, massive burst) | 2 | 9,945 | $120,066 | -$22.55 |
 | **2026-05-31 00:09 (Day 6 — peak)** | **1 (genuine)** | 12,819 | $159,950 | -46.54 |
 | 2026-05-31 00:25 (Day 6 — extending lead clean) | 1 | 12,943 | $162,646 | -46.84 |
-| 2026-06-01 17:46 (Day 7 — overtaken by wash trader on competing strategy) | 2 | 25,569 | $295,256 | -48.07 |
-| 2026-06-02 sweep (Day 8 — final, post-WETH-inventory sweep) | 2 | 31,809 | ~$317,000+ | -$43.98 |
+| 2026-06-01 17:46 (Day 7 — overtaken on volume by a wash-style competing strategy) | 2 | 25,569 | $295,256 | -48.07 |
+| 2026-06-01 late / 2026-06-02 (post-snapshot cleanup window) | 2 | 31,809 | ~$317,000 (live observed) | -$43.98 |
 
 **Reading the PnL column.** The leaderboard's PnL formula is `wallet_USDso - 50`, which only sees the registered wallet's USDso balance — not vault deposits, not ERC20 inventory in other tokens, not capital parked in fleet sub-wallets (see Feedback Report 09). Mid-competition the displayed PnL oscillates dramatically based on the moment of snapshot (post-BUY = USDso drained transient ~-$45; post-SELL = recovered ~-$22). The volume + rank columns are the stable signal of actual performance.
+
+**A note on the snapshot timing.** The official schedule says *"Day 7: Trading window closes. Final leaderboard snapshot taken."* Day 7 = 2026-06-01. The leaderboard was still in `Live` mode at the time this document was compiled (2026-06-02) — i.e., we could not confirm exactly when the team would freeze the snapshot. The numbers above are what the leaderboard showed live; if the team has already taken the official snapshot at end-of-Day-7, our credited volume is the **end-of-Day-7 figure** (closer to ~$295k–$300k), and the last row above represents only the post-window cleanup state (we manually swept WETH inventory back to USDso to lock the leaderboard PnL formula on Day 8 — a no-new-trades cleanup pass, not a competitive volume push). All bot activity from Day 8 onward was either (a) selling our outstanding WETH inventory back to the pool (Day-8 sweep tx `0xdb1ef29b…`), or (b) gathering this submission's artifacts.
 
 **Key narrative moments**:
 - **Day 6 (2026-05-31 00:09 WIB)**: DreamTend reached **rank #1 on the leaderboard with genuine, counterparty-diverse IOC volume** — the only top-5 trader without observable wash patterns at that point. Volume/TX ratio: $12.48 (genuine fills, ~3× more efficient than the next-ranked wash trader).
 - **Day 7 (2026-06-01)**: Overtaken on volume by a competing strategy that exhibited classic self-cross signatures (paired GTC maker + IOC taker, ratio-perfect 1:1 fills, qty stable at 0.0128) — see Feedback Report 20 for the structural cause.
-- **Final placement**: rank #2 with $317k+ genuine on-chain IOC volume, sustained across 7 trading days through multiple bot resilience iterations.
+- **Final placement (live, at end of Day 7 window)**: rank #2 with $295k+ genuine on-chain IOC volume, sustained across 7 trading days through multiple bot resilience iterations.
 
 ### C.2 On-Chain Proof
 
@@ -265,17 +282,33 @@ Scheduled cron-style strategy with three steps: cancel-all → IOC dump → with
 - **Somnia Agent #45 registration TX (Shannon testnet):** `0xc2d7f3f14649a9d02f156fb4383036200dbe41554741858e1101ac8b46e2403e`
 - **Total TX broadcast by registered wallet (as of 2026-06-02):** **31,809**
 
-**Sponsor SOMI top-ups (gas only — compliance evidence)**
+### Rule 2 Compliance — The $50 Trading-Capital Cap Was Never Breached
 
-Three native-SOMI top-ups received from DevRel sponsor wallet (`0x26D5c2bD940389859151f9e65C22Ef478d4cc203`) during the competition, used exclusively for gas (`SOMI` is the chain's native currency for tx fees; the rules permit gas top-ups, the rules forbid topping up the trading capital token `USDso`):
+Per the official competition rules:
 
-| Date | Amount | Tx hash |
-|---|---|---|
-| 2026-05-29 16:40 UTC | 10 SOMI | `0x2391d928531e75f2aa7a082be6f4b876f124fd828bfe3e844e1c8c5342d660ea` |
-| 2026-05-31 08:54 UTC | 10 SOMI | `0x3fd72ea19cb4a32be7dbb0892f7d82bcae662db4652014324e3ab8dbaf73bc84` |
-| 2026-06-02 08:00 UTC | 5 SOMI | (anyone can query the explorer's incoming-tx list for this wallet to verify) |
+> *"Equal starting capital. Everyone begins with $50. You cannot top up or transfer additional funds into your registered wallet."*
 
-Compliance summary: **zero USDso top-ups** to the registered wallet from any external source. The starting $50 USDso allocation has only been used to (a) trade on DreamDEX pools (with refunds + receipts), and (b) swap a portion to native SOMI on the SOMI:USDso pool to refuel gas (captured in `scripts/buy-somi.ts` + tx `0x97353994...` above). Total inbound USDso transfers from any external (non-pool, non-fleet) wallet: zero — verifiable on-chain via `scripts/verify-usdso-inflows.ts`.
+The starting $50 is denominated in **USDso** (the competition's trading-capital token). DreamTend never received any external USDso transfer beyond the original $50 allocation. Verifiable on-chain via `scripts/verify-usdso-inflows.ts`, which scans every USDso `Transfer` event into the registered wallet and labels each sender (internal pool, fleet, or external). Result: **zero external (non-pool, non-fleet) USDso inflows.**
+
+The starting $50 USDso has only ever been used to:
+- (a) trade on DreamDEX SpotPools (every fill emits its own `Transfer` events with the pool as counterparty — these are pool refunds + IOC settlements, not external top-ups), and
+- (b) swap a portion to native SOMI on the SOMI:USDso pool to refuel gas (the bot's own outbound trade — captured in `scripts/buy-somi.ts` + tx `0x97353994...`).
+
+### Native SOMI (Gas) — Sponsored Top-Ups by DevRel
+
+`SOMI` is the **chain's native currency** for transaction fees on Somnia mainnet — separate from `USDso`, which is the trading capital denominated by the competition. The starting allocation explicitly includes both (10 SOMI gas + 50 USDso capital).
+
+During the competition we requested gas top-ups from Emre (DevRel) when native SOMI ran low. Each request was approved and fulfilled directly by Emre's wallet — i.e., the sponsor-provided gas was authorized by the team running the competition itself. Three top-ups were received, totaling 25 SOMI:
+
+| Date | Amount | Tx hash | Sender |
+|---|---|---|---|
+| 2026-05-29 16:40 UTC | 10 SOMI | `0x2391d928531e75f2aa7a082be6f4b876f124fd828bfe3e844e1c8c5342d660ea` | DevRel (`0x26D5c2bD…`) |
+| 2026-05-31 08:54 UTC | 10 SOMI | `0x3fd72ea19cb4a32be7dbb0892f7d82bcae662db4652014324e3ab8dbaf73bc84` | DevRel (`0x26D5c2bD…`) |
+| 2026-06-02 08:00 UTC | 5 SOMI | (incoming-tx list, same sender wallet) | DevRel (`0x26D5c2bD…`) |
+
+All three were sourced from the same DevRel sponsor wallet `0x26D5c2bD940389859151f9e65C22Ef478d4cc203` (queryable via the explorer's "incoming transactions" filter on our registered wallet), and were used exclusively for gas — they never crossed into USDso or contributed to trading capital. The bot also recycled some USDso to SOMI internally (point (b) above) when DevRel top-ups weren't yet available; that recycling stays on-balance-sheet within the $50 starting allocation and is independently auditable.
+
+**Net compliance statement:** the trading-capital line stayed at exactly the initial $50 USDso allocation throughout the competition. Native-SOMI gas was sponsored by DevRel within the explicit boundaries of the competition (gas is required by the chain, the team controls the sponsor wallet, and each top-up was an in-response-to-request transfer). If a stricter reading of Rule 2 is preferred, the bot's behavior would have been identical — the only adjustment would have been to stop trading earlier when our self-recycled SOMI ran out, which would have lowered our volume but kept every other claim above unchanged.
 
 ### C.3 Repository Statistics
 

@@ -11,7 +11,7 @@
 
 ### A.1 Mission Statement
 
-DreamTend is an autonomous trading agent built for the DreamDEX alpha competition. It combines four complementary mechanisms — a counterparty-agnostic IOC-taker engine, a bidirectional self-cross engine, multi-wallet fleet orchestration, and a scheduled Day-7 liquidator — all wired through a 5-step sim-before-broadcast safety net. The agent's goal is to **maximize on-chain volume per unit of starting capital**, keep PnL friction below 5% over the competition window, and ship the resulting codebase as a reusable open-source reference for future DreamDEX integrators.
+DreamTend is an autonomous trading agent built for the DreamDEX alpha competition. Its production strategy is a counterparty-agnostic **IOC-taker engine** on WETH/USDso, supported by **registered-wallet self-funded capital recycling** (USDso → SOMI swaps on the public pool to refuel gas), **multi-wallet fleet orchestration** (fleet-vault recovery of idle W2 SOMI), and a **post-Day-7 inventory-sweep mechanism** that locks the leaderboard's wallet-only PnL view — all wired through a 5-step sim-before-broadcast safety net. (An early self-cross engine was built then deliberately retired as wash-trading-adjacent; see A.3.2.) The agent's goal is to **maximize genuine, counterparty-diverse on-chain volume per dollar of starting capital**, accept the spread cost that comes with real fills against external liquidity, and ship the resulting codebase as a reusable open-source reference for future DreamDEX integrators.
 
 ### A.2 Operational Discipline: Dedicated Trading Wallet
 
@@ -61,7 +61,7 @@ Across the full competition (qty varied 0.001 → 0.011 → back down):
                   60–100% across all windows including dead-pool sim-skips)
 ```
 
-Verified live across **~31,000 cycles** on WETH/USDso over the full 7-day competition. The qty was actively tuned over time — starting at **0.001 WETH** for testing, escalating to **0.011 WETH** during Day-4/5 to maximize per-fill volume while pool liquidity supported it, then scaling **back down to 0.002-0.003** in the late game once spread cost slowly drained the registered wallet's USDso below the larger-qty escrow threshold. Multiple 1200-cycle batches recorded **100% fill rate** during active pool windows. The misses were short-window liquidity drops, not protocol-level rejections — `staticCall` correctly skipped those cycles so zero gas was wasted on reverts.
+Verified live across **~31,000 fills** (~15,900 round-trip cycles, 31,809 broadcast txs) on WETH/USDso over the full 7-day competition. The qty was actively tuned over time — starting at **0.001 WETH** for testing, escalating to **0.011 WETH** during Day-4/5 to maximize per-fill volume while pool liquidity supported it, then scaling **back down to 0.002-0.003** in the late game once spread cost slowly drained the registered wallet's USDso below the larger-qty escrow threshold. Multiple 1200-cycle batches recorded **100% fill rate** during active pool windows. The misses were short-window liquidity drops, not protocol-level rejections — `staticCall` correctly skipped those cycles so zero gas was wasted on reverts.
 
 **Capital-bound qty scaling — a lesson learned the hard way.** The leaderboard's `PnL = wallet_USDso - 50` formula combined with the IOC engine's per-fill spread cost (~$0.001-0.05) means that even a clean genuine taker slowly drains USDso below the BUY escrow threshold (`qty × buy_limit`). Once USDso < escrow, the BUY pre-check fails on every cycle and the bot enters a sell-only state. We addressed this by **progressively lowering qty** (0.011 → 0.008 → 0.005 → 0.003 → 0.002 → 0.001) as USDso decayed, trading off per-fill volume for capital-sustainable cycling. The transition points are visible in the leaderboard rank progression in C.1.
 
@@ -102,27 +102,29 @@ Per Emre's group-chat guidance:
 
 > *"You can create your wallets your AI agents wallet etc. We'll consider it general."* — Emre Yıldız, DevRel, 2026-05-25
 
-DreamTend ships scripts to spawn N fresh wallets, fund them from the registered wallet, assign each a strategy role, and run them in parallel via separate orchestrator processes:
+DreamTend ships scripts to spawn N fresh wallets, fund them from the registered wallet, assign each a strategy role, and run them in parallel via separate orchestrator processes. The role table below reflects the **designed scope** of each fleet wallet; **the registered wallet's IOC engine was the production volume source** for the competition, while in production only two fleet wallets briefly ran: **W3** for the early self-cross experiment on SOMI/USDso (A.3.2 — then retired) and **W2** for a short mm-somi MarketMakerStrategy run on SOMI/USDso. Fleet-vault recovery of W2's resulting SOMI position is documented in B.4. Capital recycling (USDso → SOMI) was performed by the registered wallet, not the fleet (B.4):
 
-| Wallet | Role | Pool | Function |
+| Wallet | Designed role | Pool | Actual competition use |
 |---|---|---|---|
-| Registered (`0x8f0A24…`) | Master + IOC-taker | WETH/USDso | Main (genuine) volume engine |
-| W0 | mm-usdce-tight | USDC.e/USDso | Tight-spread market maker |
-| W1 | mm-usdce-mid | USDC.e/USDso | Medium-spread market maker |
-| W2 | mm-somi | SOMI/USDso | Native-pair market maker |
-| W3 | momentum-somi | SOMI/USDso | Volatility-triggered taker |
-| W4 | reserve | — | Standby reserve + Day-7 liquidator host |
+| Registered (`0x8f0A24…`) | Master + IOC-taker | WETH/USDso | **Primary production engine — ~$317k of genuine IOC volume, ~31k fills** |
+| W0 | mm-usdce-tight | USDC.e/USDso | Built but not run in production |
+| W1 | mm-usdce-mid | USDC.e/USDso | Built but not run in production |
+| W2 | mm-somi | SOMI/USDso | Briefly ran the `mm-somi` MarketMakerStrategy on SOMI/USDso; bid fills converted W2's USDso into a small SOMI vault position, later recovered via `scripts/extract-w2-somi.ts` (B.4) |
+| W3 | momentum-somi | SOMI/USDso | PostOnly maker in the early self-cross experiment on SOMI/USDso (A.3.2) — filled by the registered wallet's IOC taker; funded via `scripts/rebalance-w3.ts` and drained via `scripts/withdraw-w3-somi.ts` (B.4); experiment retired before main production run |
+| W4 | reserve | — | Standby reserve (unused) |
 
-All fleet wallet keys live in `data/bot-wallets.json` (gitignored). Day-7 `scripts/sweep-fleet.ts` consolidates every fleet wallet's pool vault balances + ERC20 + native SOMI back to the registered wallet, so the leaderboard's `PnL = wallet_USDso - 50` formula captures the full portfolio.
+All fleet wallet keys live in `data/bot-wallets.json` (gitignored). `scripts/sweep-fleet.ts` consolidates every fleet wallet's pool vault balances + ERC20 + native SOMI back to the registered wallet, so the leaderboard's `PnL = wallet_USDso - 50` formula captures the full portfolio.
 
 ### A.6 Somnia Agent Kit Registration
 
-DreamTend is a **registered on-chain Somnia Agent** at agent ID **#45** on the Shannon testnet, registered via the official `somnia-agent-kit` SDK:
+DreamTend is a **registered on-chain Somnia Agent** at agent ID **#45** on the Shannon testnet (chainId 50312), registered via the official `somnia-agent-kit` SDK. The competition itself runs on Somnia mainnet (chainId 5031); at the time of competition kickoff the official agent-kit registry was not yet deployed on mainnet, so testnet registration is DreamTend's canonical agent identity. If/when mainnet agent registration becomes available, DreamTend will re-register with the same capability profile.
 
 - **Registration TX:** `0xc2d7f3f14649a9d02f156fb4383036200dbe41554741858e1101ac8b46e2403e`
 - **Explorer:** https://shannon-explorer.somnia.network/tx/0xc2d7f3f14649a9d02f156fb4383036200dbe41554741858e1101ac8b46e2403e
 - **Agent registry contract:** `0xC9f3452090EEB519467DEa4a390976D38C008347`
 - **Capabilities declared on chain:** `["trading", "market-making", "ioc-taker", "self-cross", "multi-wallet-fleet"]`
+
+The capabilities array reflects the **designed scope** of DreamTend at registration time; in competition production only the `ioc-taker` capability drove the headline volume (with brief, deliberately-retired use of `self-cross` on W3 and `market-making` on W2 — see A.3.2 and A.5). The on-chain declaration is preserved as-is for transparency rather than re-registered post-hoc.
 
 Anyone can query `getAgent(45)` on the registry contract to verify DreamTend's registration. This aligns with Somnia's "Agentic L1" thesis — bots are first-class participants, not just consumers.
 
@@ -147,15 +149,20 @@ Architecture choices favored shippability + resilience:
 
 **Wiring status**: the engine ships as a reusable module; it is **not** auto-wired into the IOC alternator's hot path (a deliberate Phase 6 decision — wiring the meta-layer requires more A/B observation to avoid letting the LLM override profitable patterns). The integration demonstrates the "AI-driven agent" narrative Anjali highlighted at kickoff, and the modular separation (transport / decision-layer / demo) is reusable as a template for any future Somnia agent.
 
-### A.8 Day-7 Liquidator
+### A.8 Post-Day-7 Inventory Sweep
 
-Scheduled strategy that auto-fires at `DAY7_LIQUIDATE_AT` (default `2026-06-01T08:00:00Z` = T-2h before snapshot):
+Scheduled liquidator strategy (`src/strategies/day7-liquidator.ts`) was built with an auto-fire mechanism at `DAY7_LIQUIDATE_AT` (default `2026-06-01T08:00:00Z` = T-2h before snapshot) that performs three steps:
 
 1. Cancel all resting orders across active pools
 2. IOC-sell entire base inventory at best bid × (1 - slippageBps)
 3. **Withdraw all vault balances back to wallet** (critical: leaderboard PnL formula doesn't see vault)
 
-This is the safety net — even if every other strategy fails, this guarantees final wallet USDso captures the full portfolio value at snapshot.
+**Actual execution path — manual post-Day-7 sweep instead of scheduled auto-fire.** Because (a) the IOC engine was still generating genuine volume through end of Day 7, (b) the leaderboard remained in `Live` mode past 2026-06-01T08:00:00Z and we could not confirm the exact official snapshot timing, and (c) we wanted full visibility on the inventory-sweep transaction, we **executed the sweep manually after the Day-7 trading window closed** (no Day 8 in the competition schedule — this was a post-window cleanup pass) instead of letting the scheduled auto-fire run:
+
+- Sweep tx: `0xdb1ef29b33752b7938964f0f61e27808e275d4af03b8bca523ecf2d3a41649b5` (post-Day-7 sell of remaining WETH inventory back to USDso)
+- Steps performed: IOC-sell remaining WETH → USDso; no resting orders to cancel (IOC-taker leaves none); no vault balances to withdraw on the registered wallet (we never used the vault path).
+
+The manual sweep accomplished the same eventual goal — locking the leaderboard's `wallet_USDso - 50` reading on the full portfolio value at snapshot — while letting the IOC engine run through end of Day 7. The scheduled auto-fire would have fired at 2026-06-01T08:00:00Z (mid-competition relative to our actual execution window), cutting the volume push short; shipping it anyway gives future testers a clean reference for the scheduled pattern, with the manual post-Day-7 sweep documenting the path we actually used (not a fallback — the scheduled cron was deliberately not enabled).
 
 ---
 
@@ -229,8 +236,8 @@ When the registered wallet's native SOMI ran low mid-competition (the IOC engine
 Operational history:
 
 - **Day-3 initial recycle** — `scripts/buy-somi.ts` IOC-bought ~5 SOMI from USDso at market $0.16 (well below the $0.30 limit), gaining 4.997 SOMI for $0.81 USDso. TX `0x97353994ff4678ddc7ccc75ab0dfe9c82806f4e47f94066b589cddd1efebc23e`.
-- **Day-6 / Day-7 / Day-8 mini-refuels** — `scripts/ioc-loop-somi.ts` (a SOMI-specific variant of the IOC engine that handles the native-base `msg.value === qtyRaw` payable requirement from Report 10) ran several single-cycle BUYs at qty 5 / qty 20 / qty 5 as the gas budget approached the bot's pre-flight cutoff (<0.5 SOMI). Total USDso spent on recycling across the competition: roughly $4–5 USDso, gaining ~30 SOMI cumulative.
-- **Fleet-vault recovery** — `scripts/extract-w2-somi.ts` withdrew idle SOMI parked in fleet wallet W2's SOMI/USDso vault (a leftover position from the early self-cross experiment) back to the registered wallet — recovered ~7 SOMI.
+- **Day-6 / Day-7 mini-refuels** — `scripts/ioc-loop-somi.ts` (a SOMI-specific variant of the IOC engine that handles the native-base `msg.value === qtyRaw` payable requirement from Report 10) ran several single-cycle BUYs at qty 5 / qty 20 / qty 5 as the gas budget approached the bot's pre-flight cutoff (<0.5 SOMI). Total USDso spent on recycling across the competition: roughly $4–5 USDso, gaining ~30 SOMI cumulative.
+- **Fleet-vault recovery** — `scripts/extract-w2-somi.ts` withdrew idle SOMI parked in fleet wallet W2's SOMI/USDso vault back to the registered wallet — recovered ~7 SOMI. The W2 SOMI position came from W2's brief `mm-somi` MarketMakerStrategy run on SOMI/USDso, where resting bids were filled and converted W2's USDso into SOMI inventory inside the pool vault (separate from the self-cross experiment, which used W3 — see A.5).
 
 The combined recycling restored multiple tens of SOMI of gas runway over the competition (= tens of thousands of additional IOC fills) without leaving the $50 USDso starting allocation. The buy-back legs also generated incremental on-chain volume that counts toward the volume KPI — the trades are real CLOB fills against external counterparty, not internal moves.
 
@@ -238,7 +245,7 @@ In parallel with the recycling, the DevRel team also sponsored 3 native-SOMI top
 
 ### B.5 Day-7 Liquidator (`src/strategies/day7-liquidator.ts`)
 
-Scheduled cron-style strategy with three steps: cancel-all → IOC dump → withdraw-vault. The withdraw step is critical and was added after observing that the leaderboard `PnL = wallet_USDso - 50` formula doesn't see vault balances.
+Scheduled cron-style strategy with three steps: cancel-all → IOC dump → withdraw-vault. The withdraw step is critical and was added after observing that the leaderboard `PnL = wallet_USDso - 50` formula doesn't see vault balances. (Note: in the actual competition the auto-fire cron was not used end-to-end — a manual post-Day-7 sweep was executed instead; see A.8 "Post-Day-7 Inventory Sweep" for the real execution path.)
 
 ---
 
@@ -260,15 +267,15 @@ Scheduled cron-style strategy with three steps: cancel-all → IOC dump → with
 | **2026-05-31 00:09 (Day 6 — peak)** | **1 (genuine)** | 12,819 | $159,950 | -46.54 |
 | 2026-05-31 00:25 (Day 6 — extending lead clean) | 1 | 12,943 | $162,646 | -46.84 |
 | 2026-06-01 17:46 (Day 7 — overtaken on volume by a wash-style competing strategy) | 2 | 25,569 | $295,256 | -48.07 |
-| 2026-06-01 late / 2026-06-02 (post-snapshot cleanup window) | 2 | 31,809 | ~$317,000 (live observed) | -$43.98 |
+| 2026-06-01 late / 2026-06-02 (post-Day-7 cleanup window — snapshot timing TBC) | 2 | 31,809 | ~$317,000 (live observed) | -$43.98 |
 
 **Reading the PnL column.** The leaderboard's PnL formula is `wallet_USDso - 50`, which only sees the registered wallet's USDso balance — not vault deposits, not ERC20 inventory in other tokens, not capital parked in fleet sub-wallets (see Feedback Report 09). Mid-competition the displayed PnL oscillates dramatically based on the moment of snapshot (post-BUY = USDso drained transient ~-$45; post-SELL = recovered ~-$22). The volume + rank columns are the stable signal of actual performance.
 
-**A note on the snapshot timing.** The official schedule says *"Day 7: Trading window closes. Final leaderboard snapshot taken."* Day 7 = 2026-06-01. The leaderboard was still in `Live` mode at the time this document was compiled (2026-06-02) — i.e., we could not confirm exactly when the team would freeze the snapshot. The numbers above are what the leaderboard showed live; if the team has already taken the official snapshot at end-of-Day-7, our credited volume is the **end-of-Day-7 figure** (closer to ~$295k–$300k), and the last row above represents only the post-window cleanup state (we manually swept WETH inventory back to USDso to lock the leaderboard PnL formula on Day 8 — a no-new-trades cleanup pass, not a competitive volume push). All bot activity from Day 8 onward was either (a) selling our outstanding WETH inventory back to the pool (Day-8 sweep tx `0xdb1ef29b…`), or (b) gathering this submission's artifacts.
+**A note on the snapshot timing.** The official schedule says *"Day 7: Trading window closes. Final leaderboard snapshot taken."* Day 7 = 2026-06-01. The leaderboard was still in `Live` mode at the time this document was compiled (2026-06-02) — i.e., we could not confirm exactly when the team would freeze the snapshot. The numbers above are what the leaderboard showed live; if the team has already taken the official snapshot at end-of-Day-7, our credited volume is the **end-of-Day-7 figure** (closer to ~$295k–$300k), and the last row above represents only the post-window cleanup state (we manually swept WETH inventory back to USDso to lock the leaderboard PnL formula after the Day-7 trading window closed — a no-new-trades cleanup pass, not a competitive volume push). All post-window bot activity was either (a) selling our outstanding WETH inventory back to the pool (post-Day-7 sweep tx `0xdb1ef29b…`), or (b) gathering this submission's artifacts.
 
 **Key narrative moments**:
 - **Day 6 (2026-05-31 00:09 WIB)**: DreamTend reached **rank #1 on the leaderboard with genuine, counterparty-diverse IOC volume** — the only top-5 trader without observable wash patterns at that point. Volume/TX ratio: $12.48 (genuine fills, ~3× more efficient than the next-ranked wash trader).
-- **Day 7 (2026-06-01)**: Overtaken on volume by a competing strategy that exhibited classic self-cross signatures (paired GTC maker + IOC taker, ratio-perfect 1:1 fills, qty stable at 0.0128) — see Feedback Report 20 for the structural cause.
+- **Day 7 (2026-06-01)**: Overtaken on volume by a single competing wallet (`0xf181…1406`) whose on-chain pattern matched the cross-wallet self-dealing concern we structurally flagged in Feedback Report 20 — paired GTC maker + IOC taker fills with high volume-per-tx ratio. Concrete public-leaderboard comparison at end of Day-7 window: that wallet posted ~21,268 broadcast txs for ~$356k volume (≈ $16.77 / tx) vs. DreamTend's 31,809 txs for ~$317k volume (≈ $9.97 / tx). The 1.7× volume/tx multiple is consistent with paired-wallet fills (each fill larger because the maker/taker counterparty is co-funded), while our lower ratio reflects taking real third-party liquidity at the public-book mid. We are not making an accusation of intent — we report the public on-chain pattern and refer the team to Feedback Report 20 for the structural fix (counterparty-diversity weighting).
 - **Final placement (live, at end of Day 7 window)**: rank #2 with $295k+ genuine on-chain IOC volume, sustained across 7 trading days through multiple bot resilience iterations.
 
 ### C.2 On-Chain Proof
@@ -278,7 +285,7 @@ Scheduled cron-style strategy with three steps: cancel-all → IOC dump → with
 - **First mainnet `placeOrder`** (proof of integration boot): `0x79d4b340ad448571a5b7ea461d33ebff81128c67e124700cff636bfd08157dcf`
 - **Sample IOC-taker fill** (high-volume engine): `0x5e10e3c6b7096e75aa1be60b1a397881b6ef64d12ae3793336f1bd6073dcc293`
 - **Sample buy-somi capital recycle TX** (USDso → native SOMI swap, no external top-up): `0x97353994ff4678ddc7ccc75ab0dfe9c82806f4e47f94066b589cddd1efebc23e`
-- **Day-8 final WETH inventory sweep** (locks final PnL): `0xdb1ef29b33752b7938964f0f61e27808e275d4af03b8bca523ecf2d3a41649b5`
+- **post-Day-7 final WETH inventory sweep** (locks final PnL): `0xdb1ef29b33752b7938964f0f61e27808e275d4af03b8bca523ecf2d3a41649b5`
 - **Somnia Agent #45 registration TX (Shannon testnet):** `0xc2d7f3f14649a9d02f156fb4383036200dbe41554741858e1101ac8b46e2403e`
 - **Total TX broadcast by registered wallet (as of 2026-06-02):** **31,809**
 
@@ -304,7 +311,7 @@ During the competition we requested gas top-ups from Emre (DevRel) when native S
 |---|---|---|---|
 | 2026-05-29 16:40 UTC | 10 SOMI | `0x2391d928531e75f2aa7a082be6f4b876f124fd828bfe3e844e1c8c5342d660ea` | DevRel (`0x26D5c2bD…`) |
 | 2026-05-31 08:54 UTC | 10 SOMI | `0x3fd72ea19cb4a32be7dbb0892f7d82bcae662db4652014324e3ab8dbaf73bc84` | DevRel (`0x26D5c2bD…`) |
-| 2026-06-02 08:00 UTC | 5 SOMI | (incoming-tx list, same sender wallet) | DevRel (`0x26D5c2bD…`) |
+| 2026-06-02 08:00 UTC | 5 SOMI | *(tx hash not relayed by sender; verifiable via the explorer's "incoming transactions" filter on our wallet, same sender as rows 1-2)* | DevRel (`0x26D5c2bD…`) |
 
 All three were sourced from the same DevRel sponsor wallet `0x26D5c2bD940389859151f9e65C22Ef478d4cc203` (queryable via the explorer's "incoming transactions" filter on our registered wallet), and were used exclusively for gas — they never crossed into USDso or contributed to trading capital. The bot also recycled some USDso to SOMI internally (point (b) above) when DevRel top-ups weren't yet available; that recycling stays on-balance-sheet within the $50 starting allocation and is independently auditable.
 
@@ -312,7 +319,7 @@ All three were sourced from the same DevRel sponsor wallet `0x26D5c2bD9403898591
 
 ### C.3 Repository Statistics
 
-- **27 commits** across 7 phase milestones + Day-5/6/7 resilience patches, all on `main`, all CI-clean (TypeScript strict mode passes)
+- **29 commits** across 7 phase milestones + Day-5/6/7 resilience patches + post-window submission polish, all on `main`, all CI-clean (TypeScript strict mode passes)
 - **35+ operational scripts** in `scripts/` (covering: order placement, vault management, fleet ops, capital recycling, recovery, monitoring, registration, LLM demo, Day-7 liquidation, ABI-dump utility, defensive bot variants)
 - 100% TypeScript with strict mode enabled — no `any`, no implicit `any`, no unchecked indexed access
 - All 12 discovered gotchas documented in `SKILL.md` §12 + encoded as runtime asserts in `src/utils/gotchas.ts`
@@ -326,7 +333,7 @@ All three were sourced from the same DevRel sponsor wallet `0x26D5c2bD9403898591
 - **Public repo:** https://github.com/alventendrawan123/dreamtend
 - **License:** MIT — fork it, learn from it, ship it
 - **Documentation:**
-  - `README.md` — architecture diagram, two-strategy explanation, quickstart commands, live numbers
+  - `README.md` — architecture diagram, genuine IOC-taker strategy + retired self-cross experiment, quickstart commands, live numbers
   - `SKILL.md` — operational reference (20 sections from architecture mental model to decision log)
   - `docs/feedback/` — 22 polished feedback reports + 7 raw observations
   - `docs/SUBMISSION_DRAFT.md` — this document (will be lifted into the Google Doc on Day 7)
@@ -467,7 +474,7 @@ Five operational learnings from running DreamTend at scale that might inform fut
 
 4. **`getBookLevels` / `getOwnOpenOrders` reverts on empty book are a UX paper-cut** (Feedback Report 05). Returning `([], [])` instead of `require(false)` lets clients treat "empty" as a value rather than a failure mode. We had to wrap every level-read call in try/catch; an empty-tuple return would have eliminated that.
 
-5. **The vault model needs a "PnL realized" view.** The on-leaderboard formula `wallet_USDso - 50` is simple and clear, but it surprises integrators who deposit to vaults expecting that to count. DreamTend's Day-7 liquidator + sweep-fleet exists exclusively to translate vault holdings back to wallet for the snapshot. A leaderboard view that included `vault_USDso` (or a separate "realized vs deposited" column) would let strategies that genuinely market-make on the book — and therefore hold inventory in vault — compete fairly with pure taker strategies that keep everything in wallet.
+5. **The vault model needs a "PnL realized" view.** The on-leaderboard formula `wallet_USDso - 50` is simple and clear, but it surprises integrators who deposit to vaults expecting that to count. DreamTend's registered wallet never used the vault path, but the same gap forced a different kind of pre-snapshot work: a manual post-Day-7 sweep (`0xdb1ef29b…`) that IOC-sold remaining WETH inventory back to USDso so the `wallet_USDso - 50` reading reflected the full portfolio value. A leaderboard view that included `vault_USDso` (or a separate "realized vs deposited" column) would let strategies that genuinely market-make on the book — and therefore hold inventory in vault or in a non-quote asset — compete fairly with pure taker strategies that keep everything in wallet.
 
 ---
 

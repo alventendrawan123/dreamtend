@@ -6,8 +6,11 @@ Autonomous trading agent for the [DreamDEX](https://dreamdex.io) Dev Traders Pro
 
 **Two cohorts competed:**
 
-- **Cohort 1** (May–Jun 2026, wallet `0x8f0A…ec86`, $50→milestone-topped capital) — peaked at **rank #1** in the Day-7 window (~**$317k** genuine IOC volume, ~31.8k txs, PnL −$43.98), then over the extended run (Days 8–22) grew to ~**$1.31M** volume / ~98k txs for a **final rank #2 of 6 → auto-qualified for the next cohort**. 22 polished feedback reports + a full API/docs audit. Write-up: [`docs/SUBMISSION_DRAFT.md`](docs/SUBMISSION_DRAFT.md).
-- **Cohort 2** (2026-06-24 → 07-07, fresh zero-tx wallet `0xba4E…75E1`, $150 capital) — **#3 by raw volume, 945,661 USDso**, **127,570 txs — the highest tx count in the cohort**, 31 bug reports (B1–B31) + a full API stress-test & developer-docs validation. Write-up: [`docs/cohort2-SUBMISSION.md`](docs/cohort2-SUBMISSION.md).
+- **Cohort 1 — DreamDEX Alpha Trading Competition** (wallet `0x8f0A…ec86`, $50 → milestone-topped capital), run in **two phases**:
+  - **Phase 1** (Day 1–7, 2026-05-26 → 06-01) — peaked at **rank #1**, ~**$317k** genuine IOC volume, ~31.8k txs, PnL −$43.98.
+  - **Phase 2** (extended run, Days 8–22, → 2026-06-22) — grew to ~**$1.31M** volume / ~98k txs for a **final rank #2 of 6 → auto-qualified for the next cohort**.
+  - 22 polished feedback reports + a full API/docs audit. Write-up: [`docs/SUBMISSION_DRAFT.md`](docs/SUBMISSION_DRAFT.md).
+- **Cohort 2 — DreamDEX Dev Traders Program** (2026-06-24 → 07-07, fresh zero-tx wallet `0xba4E…75E1`, $150 capital) — **#3 by raw volume, 945,661 USDso**, **127,570 txs — the highest tx count in the cohort**, 31 bug reports (B1–B31) + a full API stress-test & developer-docs validation. Write-up: [`docs/cohort2-SUBMISSION.md`](docs/cohort2-SUBMISSION.md).
 
 Both cohorts traded **genuine, counterparty-diverse volume — no wash trading**. The sections below detail the Cohort-1 architecture (the IOC-taker engine + multi-wallet scaffold); see **[Cohort 2](#cohort-2--dreamdex-dev-traders-program-2026-06-24--07-07)** for the alternating maker+taker engine and findings.
 

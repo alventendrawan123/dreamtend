@@ -119,8 +119,8 @@ async function checkRest(symbol: string): Promise<void> {
     const book = await rest.getOrderBook(symbol);
     const topBid = book.bids[0];
     const topAsk = book.asks[0];
-    const bidStr = topBid ? `${topBid.price} × ${topBid.size}` : "empty";
-    const askStr = topAsk ? `${topAsk.price} × ${topAsk.size}` : "empty";
+    const bidStr = topBid ? `${topBid.price} × ${topBid.quantity}` : "empty";
+    const askStr = topAsk ? `${topAsk.price} × ${topAsk.quantity}` : "empty";
     record(
       `REST /orderbooks?symbols=${symbol}`,
       "ok",

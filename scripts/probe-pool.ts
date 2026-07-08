@@ -26,10 +26,10 @@ async function main(): Promise<void> {
       takerFeeBpsTimes1k: params[3].toString(),
       tickRaw: params[4].toString(),
       tickDecimal: Number(ethers.formatUnits(params[4], quoteT.decimals)),
-      lotRaw: params[5].toString(),
-      lotDecimal: Number(ethers.formatUnits(params[5], baseT.decimals)),
-      minQtyRaw: params[6].toString(),
-      minQtyDecimal: Number(ethers.formatUnits(params[6], baseT.decimals)),
+      minQtyRaw: params[5].toString(), // getPoolParams tail = (tickSize, minQuantity, lotSize)
+      minQtyDecimal: Number(ethers.formatUnits(params[5], baseT.decimals)),
+      lotRaw: params[6].toString(),
+      lotDecimal: Number(ethers.formatUnits(params[6], baseT.decimals)),
     },
     `Pool params for ${POOL_SYMBOL}`,
   );

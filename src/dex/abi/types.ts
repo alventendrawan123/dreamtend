@@ -36,6 +36,11 @@ export interface SpotPoolMethods {
     void,
     ethers.ContractTransactionResponse
   >;
+  reduceOrder: ethers.BaseContractMethod<
+    [bigint, bigint],
+    void,
+    ethers.ContractTransactionResponse
+  >;
   deposit: ethers.BaseContractMethod<
     [string, bigint],
     void,
@@ -56,17 +61,18 @@ export interface SpotPoolMethods {
     void,
     ethers.ContractTransactionResponse
   >;
+  // tuple order is (baseToken, quoteToken, makerFeeBpsTimes1k, takerFeeBpsTimes1k, tickSize, minQuantity, lotSize)
   getPoolParams: ethers.BaseContractMethod<
     [],
     [string, string, bigint, bigint, bigint, bigint, bigint],
     [string, string, bigint, bigint, bigint, bigint, bigint]
   >;
   getBookLevels: ethers.BaseContractMethod<
-    [boolean, number],
-    [bigint[], bigint[]],
-    [bigint[], bigint[]]
+    [boolean, bigint],
+    Array<[bigint, bigint]>,
+    Array<[bigint, bigint]>
   >;
-  getOwnOpenOrders: ethers.BaseContractMethod<[string], bigint[], bigint[]>;
+  getOwnOpenOrders: ethers.BaseContractMethod<[], bigint[], bigint[]>;
   getWithdrawableBalance: ethers.BaseContractMethod<
     [string, string],
     bigint,

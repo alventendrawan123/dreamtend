@@ -54,8 +54,10 @@ export async function readBookLevels(
 ): Promise<BookLevels> {
   const safeRead = async (isBid: boolean): Promise<[bigint[], bigint[]]> => {
     try {
-      const [prices, sizes]: [bigint[], bigint[]] =
-        await handle.readonly.getBookLevels(isBid, depth);
+      // getBookLevels(bool,uint64) returns OrderBookLevel[] = [price, quantity][]
+      const levels = await handle.readonly.getBookLevels(isBid, BigInt(depth));
+      const prices = levels.map((l) => l[0]);
+      const sizes = levels.map((l) => l[1]);
       return [prices, sizes];
     } catch (err) {
       const msg = (err as Error).message;
@@ -104,8 +106,8 @@ export async function readPoolParams(handle: PoolHandle): Promise<PoolParamsOnch
     makerFeeBpsTimes1k: result[2],
     takerFeeBpsTimes1k: result[3],
     tickSize: result[4],
-    lotSize: result[5],
-    minQuantity: result[6],
+    minQuantity: result[5],
+    lotSize: result[6],
   };
 }
 
@@ -121,5 +123,8 @@ export async function readOwnOpenOrders(
   handle: PoolHandle,
   account: string,
 ): Promise<bigint[]> {
-  return handle.readonly.getOwnOpenOrders(account);
+  // getOwnOpenOrders() is NO-ARG and scopes by msg.sender → set `from` so an
+  // eth_call reads the target account's orders (the old (address) form reverts).
+  const fn = handle.readonly.getOwnOpenOrders as unknown as (o: { from: string }) => Promise<bigint[]>;
+  return fn({ from: account });
 }

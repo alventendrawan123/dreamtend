@@ -63,3 +63,9 @@ COMMIT_MSG.txt
 COMMIT_MSG_*.txt
 
 .claude/settings.local.json
+
+# Scratch / one-off audit files (root-level, not for the public repo)
+/_*.mjs
+/audit-onchain-claims*.mjs
+/avgcost.mjs
+/scratch-*.mjs

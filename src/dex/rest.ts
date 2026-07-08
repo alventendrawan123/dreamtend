@@ -15,7 +15,7 @@ export interface MarketInfo {
 
 export interface OrderBookLevel {
   price: string;
-  size: string;
+  quantity: string; // API field is "quantity" (not "size")
 }
 
 export interface OrderBookSnapshot {
@@ -27,8 +27,10 @@ export interface OrderBookSnapshot {
 
 export interface RecentTrade {
   price: string;
-  size: string;
+  amount?: string; // base qty (API field "amount", not "size")
+  cost?: string; // quote total
   side?: "buy" | "sell";
+  id?: string; // composite "makerOrderId:takerOrderId"
   timestamp?: number;
   [key: string]: unknown;
 }

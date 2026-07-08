@@ -316,7 +316,7 @@ async function runOneCycle(p: CycleParams): Promise<CycleResult> {
   if (!takerReceipt) throw new Error("Taker receipt null");
 
   const ORDER_FILLED_TOPIC = ethers.id(
-    "OrderFilled(uint128,uint128,uint256,uint256,uint256)",
+    "OrderFilled(uint128,uint128,uint256,uint256,uint256,uint256)",
   );
   let filledQty = 0n;
   for (const log of takerReceipt.logs) {

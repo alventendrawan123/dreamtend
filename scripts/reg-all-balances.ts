@@ -6,7 +6,7 @@ import { TOKENS } from "../src/config/tokens.js";
 async function main(): Promise<void> {
   const net = getActiveNetwork();
   const p = new ethers.JsonRpcProvider(net.rpc, { chainId: net.chainId, name: net.name });
-  const REG = "0x8f0A24AE910D4B89C4422b6884d71739DBC1ec86";
+  const REG = process.env.WALLET_ADDRESS ?? new ethers.Wallet(process.env.PRIVATE_KEY!).address;
   const erc20 = ["function balanceOf(address) view returns (uint256)"];
 
   console.log(`Registered wallet ${REG} — all token balances (mainnet)`);

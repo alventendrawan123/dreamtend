@@ -22,7 +22,7 @@ const USDSO_FLOOR = Number(process.argv[8] ?? "0");
 const USDSO_CEILING = Number(process.argv[9] ?? "0");
 
 const ORDER_FILLED_TOPIC = ethers.id(
-  "OrderFilled(uint128,uint128,uint256,uint256,uint256)",
+  "OrderFilled(uint128,uint128,uint256,uint256,uint256,uint256)",
 );
 
 const ERC20_ABI = [
@@ -121,10 +121,10 @@ async function main(): Promise<void> {
 
     // Gas pre-flight: native SOMI is fuel for every broadcast.
     const nativeBal = await provider.getBalance(wallet.address);
-    if (nativeBal < ethers.parseUnits("0.5", 18)) {
+    if (nativeBal < ethers.parseUnits("0.1", 18)) {
       logger.error(
         { cycle, nativeSomi: ethers.formatUnits(nativeBal, 18) },
-        "Gas SOMI critical (<0.5) — aborting loop, refuel needed",
+        "Gas SOMI critical (<0.1) — aborting loop, refuel needed",
       );
       break;
     }
@@ -189,7 +189,7 @@ async function main(): Promise<void> {
 
     try {
       const [simOk, simId] = await withTimeout(
-        c.placeTakerOrderWithoutVault.staticCall(...args, { value: 0n }),
+        c.placeOrder.staticCall(...args, { value: 0n }),
         15000,
         "sim",
       );
@@ -202,7 +202,7 @@ async function main(): Promise<void> {
       }
 
       const tx = await withTimeout(
-        c.placeTakerOrderWithoutVault(...args, { value: 0n }),
+        c.placeOrder(...args, { value: 0n }),
         30000,
         "broadcast",
       );

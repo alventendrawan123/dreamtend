@@ -30,7 +30,7 @@ const USDSO_CEILING = Number(process.argv[8] ?? "0");
 const GAS_RESERVE_SOMI = Number(process.argv[9] ?? "5");
 
 const ORDER_FILLED_TOPIC = ethers.id(
-  "OrderFilled(uint128,uint128,uint256,uint256,uint256)",
+  "OrderFilled(uint128,uint128,uint256,uint256,uint256,uint256)",
 );
 
 const ERC20_ABI = [

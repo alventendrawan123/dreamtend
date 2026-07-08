@@ -2,18 +2,14 @@
 
 > _Tending the order book on DreamDEX._
 
-Autonomous multi-wallet trading agent for the [DreamDEX](https://dreamdex.io) Alpha Trading Competition on the [Somnia](https://somnia.network) blockchain. Built in TypeScript on top of [ethers v6](https://docs.ethers.org/v6/).
+Autonomous trading agent for the [DreamDEX](https://dreamdex.io) Dev Traders Program on the [Somnia](https://somnia.network) blockchain. Built in TypeScript on top of [ethers v6](https://docs.ethers.org/v6/).
 
-**Final standing (end-of-Day-7 window, 2026-06-01):**
+**Two cohorts competed:**
 
-- 🥇 Reached **rank 1 with genuine, counterparty-diverse IOC volume** at Day-6 peak (2026-05-31 00:09 WIB, ~$159k volume)
-- 🥈 **Final rank #2** with ~$317k genuine IOC volume, 31,809 broadcast txs, ~31k fills on WETH/USDso
-- 💰 Final leaderboard PnL: -$43.98 USDso (genuine spread cost — no wash trading)
-- 📝 **22 polished feedback reports** + 7 raw observations submitted to engineering (doc gaps, ABI mismatches, pool UX, incentive-mechanism gaps, agent-integration 404s, metric-integrity)
-- 🤖 Registered as **Somnia Agent #45** on Shannon testnet via `somnia-agent-kit` SDK
-- 🔐 Production-ready safety net (eth_call simulation + event verification + gotcha asserts + defensive timeout/heartbeat layer)
+- **Cohort 1** (May–Jun 2026, wallet `0x8f0A…ec86`, $50→milestone-topped capital) — **Final rank #2 of 6**, ~**$1.31M** genuine IOC volume, ~98k broadcast txs, top-2 → **auto-qualified for the next cohort**. 22 polished feedback reports + a full API/docs audit. Write-up: [`docs/SUBMISSION_DRAFT.md`](docs/SUBMISSION_DRAFT.md).
+- **Cohort 2** (2026-06-24 → 07-07, fresh zero-tx wallet `0xba4E…75E1`, $150 capital) — **#3 by raw volume, 945,661 USDso**, **127,570 txs — the highest tx count in the cohort**, 31 bug reports (B1–B31) + a full API stress-test & developer-docs validation. Write-up: [`docs/cohort2-SUBMISSION.md`](docs/cohort2-SUBMISSION.md).
 
-Full submission narrative + 22 verbatim feedback reports: [`docs/SUBMISSION_DRAFT.md`](docs/SUBMISSION_DRAFT.md).
+Both cohorts traded **genuine, counterparty-diverse volume — no wash trading**. The sections below detail the Cohort-1 architecture (the IOC-taker engine + multi-wallet scaffold); see **[Cohort 2](#cohort-2--dreamdex-dev-traders-program-2026-06-24--07-07)** for the alternating maker+taker engine and findings.
 
 ---
 
@@ -299,6 +295,88 @@ Final live-observed numbers at end of competition window (post-Day-7 sweep, 2026
 | Self-recycled gas (USDso → SOMI) | ~30 SOMI cumulative for ~$4–5 USDso on registered wallet         |
 | Bugs caught by safety net        | 1 silent-rejection event topic mismatch (recovered Day-1)        |
 | Feedback reports submitted       | 22 polished + 7 raw observations in OBSERVATIONS.md              |
+
+---
+
+## Phase 2 — Extended Competition (Days 8–22)
+
+The competition ran well past the original Day-7 window. We kept the registered
+wallet active throughout, and the extended period surfaced the most valuable
+findings of the whole program — including a **breaking, undocumented API change
+mid-competition**. All Phase-2 trading stayed genuine IOC round-trips (no wash);
+DevRel routed earned milestone rewards (+$25, then +$20 USDso) and SOMI gas
+top-ups to the wallet, which let us push volume well beyond the original
+$50-capital ceiling.
+
+### Phase-2 key findings (feedback)
+
+- **`placeTakerOrderWithoutVault` was DEPRECATED mid-competition** (confirmed by a
+  Somnia dev in chat: *"we have deprecated `placeTakerOrderWithoutVault` and you
+  should be using `placeOrder` going forward"*). With no in-doc deprecation
+  notice, every taker order suddenly reverted with a **bare `require(false)`
+  (empty `data="0x"`, no reason string)** — which is extremely hard to diagnose.
+  We isolated it by ruling out allowance / tick-lot alignment / escrow / expiry,
+  then confirmed `placeOrder` is a **drop-in, wallet-funded (auto-pull)
+  replacement** with the identical 9-arg signature. *Suggestion: ship a
+  changelog + deprecation warnings, and add named custom errors so a deprecated
+  entrypoint doesn't fail as an undebuggable `require(false)`.*
+- **`OrderFilled` real topic is `0xc87f4223…`** = `OrderFilled(uint128,uint128,
+  uint256,uint256,uint256,uint256)` (six trailing uints incl. `fillPrice`). Code
+  built against a 5-uint variant silently logs "no fill events" while trades
+  actually succeed.
+- **`buyLimit` must track the live ask.** When the underlying (WETH) rallied past
+  a static `buyLimit`, the IOC BUY stopped crossing and the loop dead-locked
+  (BUY can't match / SELL has no inventory). Operational fix: re-derive the
+  marketable limit from the REST touch each cycle.
+
+### Phase-2 engineering
+
+- **Capital-deployment efficiency (WBTC vs WETH).** A coarse lot on a high-priced
+  pair wastes small capital — e.g. WBTC `lot 0.0001 × ~$64k ≈ $6.4/lot` means a
+  ~$15 balance only fits one lot. WETH's finer `lot 0.001 × ~$1.8k ≈ $1.8/lot`
+  deploys the same capital ~fully, giving a larger round-trip notional per cycle.
+- **Self-healing run wrapper** (`scripts/run-loop.sh`) — auto-restarts the loop on
+  RPC `ECONNRESET` / `ENOTFOUND` (non-zero exit) but stops cleanly on a gas-abort
+  (exit 0), so a flaky RPC never silently parks the bot.
+
+### Phase-2 final numbers
+
+| Metric | Value |
+| --- | --- |
+| Final leaderboard rank | **#2 of 6** |
+| Final raw volume | **~$1,309,768 USDso** (genuine IOC round-trips) |
+| Total mainnet TX (cumulative) | **~98,000** (registered wallet) |
+| Wash trading | **none** — every fill against external liquidity |
+| Milestone rewards routed to wallet | +$25 then +$20 USDso (+ SOMI gas top-ups) |
+| Outcome | **Top-2 finish → auto-qualified for the next cohort** |
+
+---
+
+## Cohort 2 — DreamDEX Dev Traders Program (2026-06-24 → 07-07)
+
+Second cohort, run on a **fresh zero-tx wallet** (`0xba4E595D6C2e655592c86ce29BbAec202d9175E1`, "trader-3"), $150 starting capital, eligible pairs WETH/WBTC/SOMI vs USDso. The full deliverable — API stress-test (Objective 1), developer-docs validation (Objective 2), and trading evidence (Objective 3), with all 31 bug reports + doc-fix tables — is in [`docs/cohort2-SUBMISSION.md`](docs/cohort2-SUBMISSION.md).
+
+### Result (final leaderboard, 2026-07-08)
+
+| Metric | Value |
+| --- | --- |
+| Rank by raw volume | **#3 of 6** — 945,661.04 USDso |
+| Tx count | **127,570 — highest in the cohort** (1.35× the next, 94,424) |
+| PnL | −146.44 USDso (capital fully converted into volume + stress-test coverage) |
+| Eff. volume (board metric = Raw × (1 + PnL%)) | 22,420.24 (#4 by that ranking) |
+| Bug reports | **31** (B1–B31) + ~38 doc fixes, severity-tagged |
+| Wash trading | **none** — genuine two-sided flow, on-chain audited ~$118k/day |
+| Outcome | eligible for the next cohort; official rewards announcement pending |
+
+### Engine — `make-take.ts` (alternating maker + taker)
+
+Cohort-2 volume came from a single-process **alternating maker+taker** engine on one nonce stream: a PostOnly maker window + IOC taker round-trips, with a **drift-kill** (sell only what the paired buy filled → never accidentally net-short) and **dynamic taker sizing** (size the buy to free USDso → never starves). Structural bleed measured **~1.18 bps of volume = ½ the book spread** — the honest floor for a volume-generating taker at 0/0 fees. Near-free maker variants (`mm-pullonmove.ts`) preserve capital when raw volume alone is the metric.
+
+Also **demonstrated live on mainnet: non-custodial session-key delegation** (`scripts/operator-demo.ts`) — a hot/session key trades on behalf of the cold wallet (`placeOrderFor`/`cancelOrderFor`) without ever holding custody, the clean answer to running a 24/7 bot on a low-trust server key.
+
+### New Cohort-2 scripts
+
+`make-take.ts` (volume engine) · `mm-pullonmove.ts` (near-free maker) · `breakout-bot.ts` (OOS-validated 1h-ETH Bollinger breakout) · `backtest.ts` + `backtest-grid.ts` + `backtest-sweep.ts` (research) · `operator-demo.ts` (session-key delegation) · `consolidate-sell.ts` (inventory → USDso) · `pnl.ts` · `cancel-all.ts`.
 
 ---
 

@@ -12,7 +12,7 @@ const BLOCK_LOOKBACK = Number(process.argv[3] ?? "200000");
 const CHUNK = 999;
 
 const ORDER_PLACED_TOPIC = "0xd90f62f61ee2f606b132cfdfd883ddd079228b6fd6bffd9d7cf848daf824639d";
-const ORDER_FILLED_TOPIC = ethers.id("OrderFilled(uint128,uint128,uint256,uint256,uint256)");
+const ORDER_FILLED_TOPIC = ethers.id("OrderFilled(uint128,uint128,uint256,uint256,uint256,uint256)");
 
 const ORDER_TYPE_LABELS = ["GTC", "POST_ONLY", "IOC", "FOK"] as const;
 

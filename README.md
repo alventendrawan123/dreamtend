@@ -4,15 +4,26 @@
 
 Autonomous trading agent for the [DreamDEX](https://dreamdex.io) Dev Traders Program on the [Somnia](https://somnia.network) blockchain. Built in TypeScript on top of [ethers v6](https://docs.ethers.org/v6/).
 
-**Two cohorts competed:**
+**Three cohorts competed — a top-3 finish in every one, with a peak of rank #1:**
+
+### Leaderboard results (all cohorts)
+
+| Cohort | Program | Wallet | Capital | Final rank | Volume | Engine / highlight |
+|---|---|---|---|---|---|---|
+| **1** | Alpha Trading | `0x8f0A…ec86` | $50 → milestones | **#2 of 6** (peaked **#1**) | ~**$1.31M** | IOC-taker · 22 feedback reports |
+| **2** | Dev Traders | `0xba4E…75E1` | $150 | **#3 of 6** by raw (#4 by eff) | **$945,661** | maker+taker · 31 bug reports · highest tx |
+| **3** | Dev Traders | `0x2445…f140` | $150 | **#2 of 8** | ~**$1.86M** | EIP-7702 WS-taker · feedback report |
+
+Details per cohort:
 
 - **Cohort 1 — DreamDEX Alpha Trading Competition** (wallet `0x8f0A…ec86`, $50 → milestone-topped capital), run in **two phases**:
   - **Phase 1** (Day 1–7, 2026-05-26 → 06-01) — peaked at **rank #1**, ~**$317k** genuine IOC volume, ~31.8k txs, PnL −$43.98.
   - **Phase 2** (extended run, Days 8–22, → 2026-06-22) — grew to ~**$1.31M** volume / ~98k txs for a **final rank #2 of 6 → auto-qualified for the next cohort**.
   - 22 polished feedback reports + a full API/docs audit. Write-up: [`docs/SUBMISSION_DRAFT.md`](docs/SUBMISSION_DRAFT.md).
 - **Cohort 2 — DreamDEX Dev Traders Program** (2026-06-24 → 07-07, fresh zero-tx wallet `0xba4E…75E1`, $150 capital) — **#3 by raw volume, 945,661 USDso**, **127,570 txs — the highest tx count in the cohort**, 31 bug reports (B1–B31) + a full API stress-test & developer-docs validation. Write-up: [`docs/cohort2-SUBMISSION.md`](docs/cohort2-SUBMISSION.md).
+- **Cohort 3 — DreamDEX Dev Traders Program** (2026-07-08 → 07-22, fresh zero-tx wallet `0x2445…f140`, $150 capital) — **final rank #2 of 8, ~$1.86M volume**, powered by an **event-driven EIP-7702 atomic-taker** (one type-4 tx = IOC buy + IOC sell, inventory-flat). Top-2 finish → auto-qualified + invited to the **Founders Trading Program** (perp launch). Feedback: [`feedback7Jul-21Jul.md`](feedback7Jul-21Jul.md).
 
-Both cohorts traded **genuine, counterparty-diverse volume — no wash trading**. The sections below detail the Cohort-1 architecture (the IOC-taker engine + multi-wallet scaffold); see **[Cohort 2](#cohort-2--dreamdex-dev-traders-program-2026-06-24--07-07)** for the alternating maker+taker engine and findings.
+All three cohorts traded **genuine, counterparty-diverse volume — no wash trading**. The sections below detail the Cohort-1 architecture (the IOC-taker engine + multi-wallet scaffold); see **[Cohort 2](#cohort-2--dreamdex-dev-traders-program-2026-06-24--07-07)** for the alternating maker+taker engine and **[Cohort 3](#cohort-3--dreamdex-dev-traders-program-2026-07-08--07-22)** for the EIP-7702 WS-taker.
 
 ---
 
@@ -380,6 +391,30 @@ Also **demonstrated live on mainnet: non-custodial session-key delegation** (`sc
 ### New Cohort-2 scripts
 
 `make-take.ts` (volume engine) · `mm-pullonmove.ts` (near-free maker) · `breakout-bot.ts` (OOS-validated 1h-ETH Bollinger breakout) · `backtest.ts` + `backtest-grid.ts` + `backtest-sweep.ts` (research) · `operator-demo.ts` (session-key delegation) · `consolidate-sell.ts` (inventory → USDso) · `pnl.ts` · `cancel-all.ts`.
+
+---
+
+## Cohort 3 — DreamDEX Dev Traders Program (2026-07-08 → 07-22)
+
+Third cohort, fresh zero-tx wallet (`0x2445e495b563908973F2d1ba6bD564709E0cf140`, "trader-5"), $150 starting capital, eligible pairs WBTC/WETH/SOMI vs USDso. Pure-volume KPI ($25 per 500k USDso milestone). Feedback: [`feedback7Jul-21Jul.md`](feedback7Jul-21Jul.md).
+
+### Result (final leaderboard)
+
+| Metric | Value |
+| --- | --- |
+| Final rank | **#2 of 8** |
+| Final volume | **~$1,857,753 USDso** |
+| Milestone rewards | ~$75 ($25 × 3 crossings) |
+| Wash trading | **none** — genuine 7702 IOC round-trips + maker fills |
+| Outcome | **Top-2 → auto-qualified + invited to the Founders Trading Program (perp launch)** |
+
+### Engine — EIP-7702 WS-taker (`ws-taker.ts`)
+
+Cohort-3's endgame volume engine is an **event-driven EIP-7702 atomic taker**: one **type-4 transaction = IOC buy + IOC sell** in a single atomic round-trip (inventory-flat, **zero net leak**), driven off the live WebSocket order book rather than REST polling. It detects sub-second tight-spread windows across multiple pools (WBTC + WETH), fires the tightest, and layers on an **adaptive spread gate** (widens the longer it goes without a fill), an **aggressive sell-cross leak-flush** (guarantees the sell leg crosses → stays flat), and a **consecutive-error halt** (exits loudly instead of silently error-looping).
+
+Audited across **~21,400 round-trips**: **~$1.19M taker volume at ~0.51 bps all-in** (spread + gas) on the best config, with gas a rock-steady **0.0123 SOMI/round-trip** (≈2.05M gas × ~6 gwei). Key finding: **leg size is the efficiency lever** — gas is a fixed cost per round-trip, so a bigger clip dilutes it (a $150 wallet drained to tiny legs pays 10× the gas-per-dollar of a well-funded one). The remaining cohort volume came from the near-free `mm-pullonmove` maker. A companion 100 ms WS spread scanner (`book-scan.local.ts`) and GO/NO-GO radar (`book-radar.local.mjs`) size the taker's gate.
+
+Feedback highlights (full report in [`feedback7Jul-21Jul.md`](feedback7Jul-21Jul.md)): the 7702 "insufficient-gas" send surfaces as a misleading *"Missing or invalid parameters"*; `/v0/trades` is 401-gated while `/v0/orderbooks` is public; the leaderboard P&L column is both inventory-blind and top-up-blind; and the SDK reads `RPC_URL` (not `MAINNET_RPC`).
 
 ---
 
